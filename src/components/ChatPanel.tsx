@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useContextStore } from '../store/useContextStore'
 import type { ContextUnit, Conversation } from '../store/useContextStore'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 function roleLabel(role: ContextUnit['type']) {
   if (role === 'user') return 'You'
@@ -184,7 +186,11 @@ export function ChatPanel() {
       >
         {roleLabel(m.type)}
       </div>
-      <div className="whitespace-pre-wrap leading-relaxed text-zinc-100/90">{m.content}</div>
+      <div className="prose prose-invert max-w-none prose-pre:mt-2 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-code:text-[0.9em] prose-code:before:hidden prose-code:after:hidden">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+          {m.content}
+        </ReactMarkdown>
+      </div>
     </div>
   )
 
@@ -204,64 +210,12 @@ export function ChatPanel() {
             <h1 className="text-lg font-semibold tracking-tight">Live Context Editor</h1>
             <p className="text-xs text-zinc-400">Chat on the left. Curate context on the right.</p>
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              value={conversationTitleDraft}
-              onChange={(e) => setConversationTitleDraft(e.target.value)}
-              placeholder="New conversation title"
-              className="hidden md:block w-52 rounded-md border border-white/10 bg-white/5 p-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
-            />
-            <button
-              onClick={handleCreateConversation}
-              className="rounded-md bg-sky-500 px-2.5 py-1.5 text-xs font-medium text-black hover:bg-sky-400"
-            >
-              New Conversation
-            </button>
-          </div>
-        </div>
-        <div className="mt-3 flex items-center gap-2 overflow-x-auto">
-          {conversations.map((c) => {
-            const isActive = c.id === activeConversation?.id
-            const parent = c.parentConversationId
-              ? conversations.find((x) => x.id === c.parentConversationId)
-              : undefined
-            return (
-              <div key={c.id} className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${isActive ? 'border-sky-500/40 bg-sky-500/10 text-sky-200' : 'border-white/10 bg-white/5 text-zinc-300'}`}>
-                <button
-                  className="truncate max-w-[12rem] flex items-center gap-1"
-                  title={parent ? `${c.title} (forked from: ${parent.title})` : c.title}
-                  onClick={() => setActiveConversation(c.id)}
-                >
-                  {c.title}
-                  {parent && <span title="Forked" className="text-[10px]">↗</span>}
-                </button>
-                <button
-                  className="text-[10px] text-zinc-400 hover:text-zinc-200"
-                  title="Rename"
-                  onClick={() => {
-                    const next = prompt('Rename conversation', c.title)
-                    if (next && next.trim()) renameConversation(c.id, next)
-                  }}
-                >
-                  ✎
-                </button>
-                <button
-                  className="text-[10px] text-rose-400 hover:text-rose-300"
-                  title="Delete"
-                  onClick={() => {
-                    if (confirm('Delete this conversation?')) deleteConversation(c.id)
-                  }}
-                >
-                  ×
-                </button>
-              </div>
-            )
-          })}
         </div>
       </div>
 
       <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">
         {units
+          .filter((u) => !u.removed)
           .filter((u) => u.type === 'user' || u.type === 'assistant')
           .map(messageItem)}
       </div>

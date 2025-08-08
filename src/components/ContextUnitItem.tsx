@@ -25,6 +25,7 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
   const toggleRemoved = useContextStore((s) => s.toggleRemoved)
   const updateUnit = useContextStore((s) => s.updateUnit)
   const openEditModal = useContextStore((s) => s.openEditModal)
+  const openRemoveModal = useContextStore((s) => s.openRemoveModal)
   const activeConversationId = useContextStore((s) => s.activeConversationId)
 
   const [isEditing, setIsEditing] = useState(false)
@@ -93,16 +94,25 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
             Edit
           </button>
           <button
-            onClick={() => togglePin(unit.id)}
-            className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.pinned ? 'bg-yellow-500 text-black' : 'bg-white/10 text-zinc-300 hover:bg-white/20'}`}
-            title={unit.pinned ? 'Unpin' : 'Pin'}
+            onClick={() => unit.type === 'user' && togglePin(unit.id)}
+            className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.type !== 'user' ? 'bg-white/5 text-zinc-500 cursor-not-allowed' : unit.pinned ? 'bg-yellow-500 text-black' : 'bg-white/10 text-zinc-300 hover:bg-white/20'}`}
+            title={unit.type !== 'user' ? 'Pinning disabled for this message type' : (unit.pinned ? 'Unpin' : 'Pin')}
+            disabled={unit.type !== 'user'}
           >
             {unit.pinned ? 'Pinned' : 'Pin'}
           </button>
           <button
-            onClick={() => toggleRemoved(unit.id)}
-            className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.removed ? 'bg-emerald-500 text-black' : 'bg-rose-500/80 text-white hover:bg-rose-500'}`}
-            title={unit.removed ? 'Restore' : 'Remove from context'}
+            onClick={() => {
+              if (unit.type !== 'user') return
+              if (unit.removed) {
+                toggleRemoved(unit.id)
+              } else {
+                openRemoveModal(activeConversationId, unit.id)
+              }
+            }}
+            className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.type !== 'user' ? 'bg-white/5 text-zinc-500 cursor-not-allowed' : unit.removed ? 'bg-emerald-500 text-black' : 'bg-rose-500/80 text-white hover:bg-rose-500'}`}
+            title={unit.type !== 'user' ? 'Removal disabled for this message type' : (unit.removed ? 'Restore' : 'Remove from context')}
+            disabled={unit.type !== 'user'}
           >
             {unit.removed ? 'Restore' : 'Remove'}
           </button>

@@ -66,6 +66,14 @@ interface ContextStoreState {
   applyEditTrim: () => void
   applyEditBranch: (title?: string) => void
 
+  // Remove modal flow
+  removeModal: { isOpen: boolean; conversationId: string; unitId: string } | null
+  openRemoveModal: (conversationId: string, unitId: string) => void
+  closeRemoveModal: () => void
+  applyRemoveDoNothing: () => void
+  applyRemoveTrim: () => void
+  applyRemoveBranch: (title?: string) => void
+
   // Regeneration request consumed by ChatPanel
   regenerationRequest: RegenerationRequestState | null
   clearRegenerationRequest: () => void
@@ -277,6 +285,9 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
   openEditModal: (conversationId, unitId, newContent) =>
     set(() => ({ editModal: { isOpen: true, conversationId, unitId, newContent } })),
   closeEditModal: () => set(() => ({ editModal: null })),
+  removeModal: null,
+  openRemoveModal: (conversationId, unitId) => set(() => ({ removeModal: { isOpen: true, conversationId, unitId } })),
+  closeRemoveModal: () => set(() => ({ removeModal: null })),
   regenerationRequest: null,
   clearRegenerationRequest: () => set(() => ({ regenerationRequest: null })),
   applyEditDoNothing: () => {
@@ -337,6 +348,71 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
     const newConversationId = get().branchFrom(modal.conversationId, modal.unitId, title)
     set(() => ({
       editModal: null,
+      activeConversationId: newConversationId,
+      regenerationRequest: {
+        mode: 'branch',
+        targetConversationId: newConversationId,
+        editedUnitId: modal.unitId,
+      },
+    }))
+  },
+  applyRemoveDoNothing: () => {
+    const state = get()
+    const modal = state.removeModal
+    if (!modal) return
+    // Mark as removed only
+    set((s) => {
+      const idx = findConversationIndex(s as any, modal.conversationId)
+      if (idx === -1) return { removeModal: null }
+      const conv = s.conversations[idx]
+      const units = conv.units.map((u) => (u.id === modal.unitId ? { ...u, removed: true, pinned: false } : u))
+      const conversations = [...s.conversations]
+      conversations[idx] = { ...conv, units }
+      return { conversations, removeModal: null }
+    })
+  },
+  applyRemoveTrim: () => {
+    const state = get()
+    const modal = state.removeModal
+    if (!modal) return
+    // Remove, trim after, request regeneration
+    set((s) => {
+      const idx = findConversationIndex(s as any, modal.conversationId)
+      if (idx === -1) return { removeModal: null }
+      const conv = s.conversations[idx]
+      const updatedUnits = conv.units.map((u) => (u.id === modal.unitId ? { ...u, removed: true, pinned: false } : u))
+      const cutIndex = updatedUnits.findIndex((u) => u.id === modal.unitId)
+      const trimmed = cutIndex === -1 ? updatedUnits : updatedUnits.slice(0, cutIndex + 1)
+      const conversations = [...s.conversations]
+      conversations[idx] = { ...conv, units: trimmed }
+      return {
+        conversations,
+        removeModal: null,
+        regenerationRequest: {
+          mode: 'trim',
+          targetConversationId: modal.conversationId,
+          editedUnitId: modal.unitId,
+        },
+      }
+    })
+  },
+  applyRemoveBranch: (title) => {
+    const state = get()
+    const modal = state.removeModal
+    if (!modal) return
+    // Mark removed in source, branch from it, request regeneration in new conversation
+    set((s) => {
+      const idx = findConversationIndex(s as any, modal.conversationId)
+      if (idx === -1) return { removeModal: null }
+      const conv = s.conversations[idx]
+      const units = conv.units.map((u) => (u.id === modal.unitId ? { ...u, removed: true, pinned: false } : u))
+      const conversations = [...s.conversations]
+      conversations[idx] = { ...conv, units }
+      return { conversations }
+    })
+    const newConversationId = get().branchFrom(modal.conversationId, modal.unitId, title)
+    set(() => ({
+      removeModal: null,
       activeConversationId: newConversationId,
       regenerationRequest: {
         mode: 'branch',
