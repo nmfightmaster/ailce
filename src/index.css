@@ -1,0 +1,6 @@
+@import "tailwindcss";
+
+/* App chrome resets */
+html, body, #root {
+  height: 100%;
+}
