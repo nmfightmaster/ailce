@@ -162,6 +162,14 @@ export function ChatPanel() {
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                if (!isRequestInFlight) {
+                  void handleSend()
+                }
+              }
+            }}
             placeholder="Type a message..."
             rows={2}
             className="min-h-10 w-full resize-y rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"

@@ -17,6 +17,7 @@ interface ContextStoreState {
   addUnit: (unit: ContextUnit) => void
   togglePin: (id: string) => void
   toggleRemoved: (id: string) => void
+  updateUnit: (id: string, newContent: string) => void
 }
 
 const nowIso = () => new Date().toISOString()
@@ -58,6 +59,10 @@ export const useContextStore = create<ContextStoreState>((set) => ({
       units: state.units.map((u) =>
         u.id === id ? { ...u, removed: !u.removed, pinned: u.removed ? u.pinned : false } : u
       ),
+    })),
+  updateUnit: (id, newContent) =>
+    set((state) => ({
+      units: state.units.map((u) => (u.id === id ? { ...u, content: newContent } : u)),
     })),
 }))
 
