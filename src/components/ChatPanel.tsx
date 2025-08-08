@@ -24,14 +24,16 @@ export function ChatPanel() {
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const [isRequestInFlight, setIsRequestInFlight] = useState(false)
-  // Ephemeral assistant typing state
+  // Streaming UI state
   const [isThinking, setIsThinking] = useState(false)
-  const [isTyping, setIsTyping] = useState(false)
-  const [typingTarget, setTypingTarget] = useState('')
-  const [typedText, setTypedText] = useState('')
-  const typingRafRef = useRef<number | null>(null)
-  const typingStartRef = useRef<number>(0)
-  const typingTokenRef = useRef<number>(0)
+  const [isStreaming, setIsStreaming] = useState(false)
+  const [streamedText, setStreamedText] = useState('')
+  const streamedTextRef = useRef('')
+  const streamAbortRef = useRef<AbortController | null>(null)
+  const streamBufferRef = useRef('')
+  const flushTimerRef = useRef<number | null>(null)
+  const hasReceivedFirstChunkRef = useRef(false)
+  const STREAM_FLUSH_MS = 40 // debounce to avoid excessive re-renders
   // Seed system message for blank conversations
   const [systemDraft, setSystemDraft] = useState('')
 
@@ -101,6 +103,161 @@ export function ChatPanel() {
     setSystemDraft('')
   }
 
+  const cancelStreaming = (opts?: { clearText?: boolean }) => {
+    // Abort fetch
+    try {
+      streamAbortRef.current?.abort()
+    } catch {}
+    streamAbortRef.current = null
+    // Clear timers
+    if (flushTimerRef.current) {
+      window.clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+    }
+    streamBufferRef.current = ''
+    hasReceivedFirstChunkRef.current = false
+    setIsStreaming(false)
+    setIsThinking(false)
+    if (opts?.clearText) {
+      setStreamedText('')
+      streamedTextRef.current = ''
+    }
+    setIsRequestInFlight(false)
+  }
+
+  const flushStreamBuffer = () => {
+    if (!streamBufferRef.current) return
+    const addition = streamBufferRef.current
+    setStreamedText((prev) => prev + addition)
+    streamedTextRef.current = streamedTextRef.current + addition
+    streamBufferRef.current = ''
+  }
+
+  const scheduleFlush = () => {
+    if (flushTimerRef.current) return
+    flushTimerRef.current = window.setTimeout(() => {
+      flushTimerRef.current = null
+      flushStreamBuffer()
+      // keep auto-flushing while streaming
+      if (isStreaming && streamBufferRef.current) scheduleFlush()
+    }, STREAM_FLUSH_MS)
+  }
+
+  const startStreaming = async (
+    params: {
+      targetConversationId: string
+      afterUnitId: string
+      messages: { role: 'system' | 'user' | 'assistant'; content: string }[]
+    }
+  ) => {
+    // Cleanup any prior stream
+    cancelStreaming({ clearText: false })
+    setIsRequestInFlight(true)
+    setIsThinking(true)
+    setStreamedText('')
+    streamedTextRef.current = ''
+    hasReceivedFirstChunkRef.current = false
+    streamBufferRef.current = ''
+
+    try {
+      const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
+      if (!apiKey) throw new Error('Missing VITE_OPENAI_API_KEY')
+      const ac = new AbortController()
+      streamAbortRef.current = ac
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ model: 'gpt-4o-mini', stream: true, messages: params.messages }),
+        signal: ac.signal,
+      })
+      if (!response.ok || !response.body) throw new Error(`OpenAI error: ${response.status}`)
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const dataStr = trimmed.slice(5).trim()
+          if (dataStr === '[DONE]') {
+            // Finish stream
+            flushStreamBuffer()
+            setIsStreaming(false)
+            setIsThinking(false)
+            setIsRequestInFlight(false)
+            // Commit final content
+            const finalText = streamedTextRef.current || ''
+            if (finalText.trim()) {
+              insertAssistantAfter(params.targetConversationId, params.afterUnitId, finalText)
+            } else {
+              insertAssistantAfter(params.targetConversationId, params.afterUnitId, '[Error: failed to get response]')
+            }
+            // Clear ephemeral state
+            streamBufferRef.current = ''
+            setStreamedText('')
+            streamedTextRef.current = ''
+            return
+          }
+          try {
+            const json = JSON.parse(dataStr)
+            const delta: string = json?.choices?.[0]?.delta?.content ?? ''
+            if (delta) {
+              if (!hasReceivedFirstChunkRef.current) {
+                hasReceivedFirstChunkRef.current = true
+                setIsThinking(false)
+                setIsStreaming(true)
+              }
+              streamBufferRef.current += delta
+              scheduleFlush()
+            }
+          } catch {
+            // ignore malformed chunks
+          }
+        }
+      }
+      // If we exit loop without [DONE], treat as end and finalize
+      flushStreamBuffer()
+      setIsStreaming(false)
+      setIsThinking(false)
+      setIsRequestInFlight(false)
+      const finalText = streamedTextRef.current || ''
+      if (finalText.trim()) {
+        insertAssistantAfter(params.targetConversationId, params.afterUnitId, finalText)
+      } else {
+        insertAssistantAfter(params.targetConversationId, params.afterUnitId, '[Error: failed to get response]')
+      }
+      streamBufferRef.current = ''
+      setStreamedText('')
+      streamedTextRef.current = ''
+    } catch (err) {
+      if ((err as any)?.name === 'AbortError') {
+        // Canceled intentionally; leave without committing
+        return
+      }
+      setIsThinking(false)
+      setIsStreaming(false)
+      setIsRequestInFlight(false)
+      insertAssistantAfter(
+        params.targetConversationId,
+        params.afterUnitId,
+        '[Error: failed to get response]'
+      )
+      streamBufferRef.current = ''
+      setStreamedText('')
+      streamedTextRef.current = ''
+    }
+  }
+
   const handleSend = async () => {
     const trimmed = input.trim()
     if (!trimmed) return
@@ -116,153 +273,63 @@ export function ChatPanel() {
     }
     addUnit(userUnit)
     setInput('')
-    setIsRequestInFlight(true)
-    // Show thinking indicator while awaiting API
-    setIsThinking(true)
-    // Reset typing states
-    cancelTyping(true)
+    // Cancel any in-flight stream before starting a new one
+    cancelStreaming({ clearText: true })
 
-    try {
-      const currentConversationId = useContextStore.getState().activeConversationId || (useContextStore.getState().conversations[0]?.id ?? '')
-      const messages = assembleMessagesFromStore(currentConversationId)
-
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
-      if (!apiKey) {
-        throw new Error('Missing VITE_OPENAI_API_KEY')
-      }
-
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error(`OpenAI error: ${response.status}`)
-      }
-      const data: any = await response.json()
-      const aiText: string = data?.choices?.[0]?.message?.content ?? ''
-      // Replace thinking bubble with typing animation
-      setIsThinking(false)
-      startTyping(aiText || '[Error: failed to get response]')
-    } catch (err) {
-      setIsThinking(false)
-      startTyping('[Error: failed to get response]')
-    } finally {
-      setIsRequestInFlight(false)
-    }
+    const targetConversationId = useContextStore.getState().activeConversationId || (useContextStore.getState().conversations[0]?.id ?? '')
+    const messages = assembleMessagesFromStore(targetConversationId)
+    void startStreaming({ targetConversationId, afterUnitId: userUnit.id, messages })
   }
 
-  // Handle regeneration flow for Trim and Branch
+  // Handle regeneration flow for Trim and Branch using the same streaming UI
   useEffect(() => {
     const req = regenerationRequest
     if (!req) return
     const run = async () => {
       try {
-        const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
-        if (!apiKey) throw new Error('Missing VITE_OPENAI_API_KEY')
         const messages = assembleMessagesFromStore(req.targetConversationId, req.editedUnitId)
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-          body: JSON.stringify({ model: 'gpt-4o-mini', messages }),
-        })
-        if (!response.ok) throw new Error(`OpenAI error: ${response.status}`)
-        const data: any = await response.json()
-        const aiText: string = data?.choices?.[0]?.message?.content ?? ''
-        insertAssistantAfter(req.targetConversationId, req.editedUnitId, aiText || '[Error: failed to get response]')
-      } catch (e) {
-        insertAssistantAfter(req.targetConversationId, req.editedUnitId, '[Error: failed to get response]')
+        await startStreaming({ targetConversationId: req.targetConversationId, afterUnitId: req.editedUnitId, messages })
       } finally {
         clearRegenerationRequest()
       }
     }
+    // Cancel any existing stream and show thinking bubble immediately
+    cancelStreaming({ clearText: true })
+    setIsThinking(true)
     void run()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regenerationRequest])
 
-  // Smooth typing animation using requestAnimationFrame
-  const startTyping = (target: string) => {
-    if (!target) return
-    cancelTyping(true)
-    setTypingTarget(target)
-    setTypedText('')
-    setIsTyping(true)
-    typingStartRef.current = performance.now()
-    const token = (typingTokenRef.current = (typingTokenRef.current || 0) + 1)
+  // Smooth typing animation helper (kept in case of future non-streamed fallbacks)
+  // Currently unused because we stream tokens directly.
 
-    const charsPerSecond = 96 // natural pace
-    const step = (now: number) => {
-      if (token !== typingTokenRef.current) return // canceled/replaced
-      const elapsed = (now - typingStartRef.current) / 1000
-      const count = Math.min(target.length, Math.floor(elapsed * charsPerSecond))
-      setTypedText(target.slice(0, count))
-      if (count >= target.length) {
-        finishTyping(target)
-        return
-      }
-      typingRafRef.current = requestAnimationFrame(step)
-    }
-    typingRafRef.current = requestAnimationFrame(step)
-  }
+  // remove old typing helpers (no longer used)
 
-  const finishTyping = (finalText: string) => {
-    // Commit assistant message to store and clear ephemeral state
-    setIsTyping(false)
-    setTypingTarget('')
-    setTypedText('')
-    if (typingRafRef.current) cancelAnimationFrame(typingRafRef.current)
-    typingRafRef.current = null
-    addUnit({
-      id: Math.random().toString(36).slice(2),
-      type: 'assistant',
-      content: finalText,
-      tags: [],
-      pinned: false,
-      removed: false,
-      timestamp: new Date().toISOString(),
-    })
-  }
-
-  const cancelTyping = (discard = false) => {
-    typingTokenRef.current += 1
-    if (typingRafRef.current) cancelAnimationFrame(typingRafRef.current)
-    typingRafRef.current = null
-    setIsTyping(false)
-    setIsThinking(false)
-    if (!discard && typingTarget) {
-      // Commit what we have
-      finishTyping(typingTarget)
-    } else {
-      setTypingTarget('')
-      setTypedText('')
-    }
-  }
-
-  // Cancel ephemeral typing when switching conversations
+  // Cancel streaming when switching conversations
   useEffect(() => {
-    cancelTyping(true)
+    cancelStreaming({ clearText: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeConversation?.id])
 
-  // Cancel typing if a regeneration flow starts
+  // Cancel stream if a regeneration flow starts (handled in effect above too)
   useEffect(() => {
-    if (regenerationRequest) cancelTyping(true)
+    if (regenerationRequest) cancelStreaming({ clearText: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regenerationRequest])
 
-  // Auto-scroll while typing
+  // Auto-scroll while streaming
   useEffect(() => {
-    if (isTyping) {
+    if (isStreaming) {
       listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
     }
-  }, [typedText, isTyping])
+  }, [streamedText, isStreaming])
+
+  // Auto-scroll when thinking starts so the typing bubble is visible immediately
+  useEffect(() => {
+    if (isThinking) {
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
+    }
+  }, [isThinking])
 
   const messageItem = (m: ContextUnit) => (
     <div key={m.id} className="flex gap-3">
@@ -298,28 +365,29 @@ export function ChatPanel() {
             .filter((u) => u.type === 'user' || u.type === 'assistant')
             .map(messageItem)}
           {/* Thinking placeholder */}
-          {isThinking && (
+          {isThinking && !isStreaming && (
             <div className="flex gap-3">
               <div className="shrink-0 select-none rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-500/15 text-emerald-300">
                 AI
               </div>
-              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300 shadow-soft animate-pulse">
-                thinking
-                <span className="inline-block w-1">.</span>
-                <span className="inline-block w-1">.</span>
-                <span className="inline-block w-1">.</span>
+              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 shadow-soft">
+                <div aria-label="AI is typing…" className="flex items-center gap-1">
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-300 [animation-delay:-0.2s]"></span>
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-300 [animation-delay:-0.1s]"></span>
+                  <span className="h-2 w-2 animate-bounce rounded-full bg-zinc-300"></span>
+                </div>
               </div>
             </div>
           )}
-          {/* Typing bubble */}
-          {isTyping && (
+          {/* Streaming bubble */}
+          {isStreaming && (
             <div className="flex gap-3">
               <div className="shrink-0 select-none rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-500/15 text-emerald-300">
                 AI
               </div>
               <div className="prose prose-invert max-w-none prose-pre:mt-2 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-code:text-[0.9em] prose-code:before:hidden prose-code:after:hidden">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {typedText || ' '}
+                  {streamedText || ' '}
                 </ReactMarkdown>
               </div>
             </div>

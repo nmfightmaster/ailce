@@ -19,6 +19,12 @@ export interface Conversation {
   parentConversationId?: string
   forkedFromUnitId?: string
   units: ContextUnit[]
+  // Live summary state
+  summary?: string
+  summaryUpdatedAt?: string
+  summaryLoading?: boolean
+  summaryError?: string
+  summaryCacheKey?: string
 }
 
 export type ChatMessageForApi = { role: 'system' | 'user' | 'assistant'; content: string }
@@ -55,6 +61,10 @@ interface ContextStoreState {
   // Advanced helpers
   assembleMessages: (conversationId: string, upToUnitId?: string) => ChatMessageForApi[]
   insertAssistantAfter: (conversationId: string, afterUnitId: string, content: string) => void
+  // Variant that returns the new assistant id for streaming updates
+  insertAssistantAfterGetId: (conversationId: string, afterUnitId: string, content: string) => string
+  // Update a unit's content within a specific conversation (used for streaming)
+  updateUnitInConversation: (conversationId: string, unitId: string, newContent: string, options?: { suppressSummaryRefresh?: boolean }) => void
   trimAfter: (conversationId: string, unitId: string) => void
   branchFrom: (conversationId: string, unitId: string, title?: string) => string
 
@@ -77,6 +87,9 @@ interface ContextStoreState {
   // Regeneration request consumed by ChatPanel
   regenerationRequest: RegenerationRequestState | null
   clearRegenerationRequest: () => void
+
+  // Summary
+  requestSummaryRefresh: (conversationId: string, immediate?: boolean, force?: boolean) => void
 }
 
 const nowIso = () => new Date().toISOString()
@@ -89,6 +102,11 @@ const createInitialConversation = (): Conversation => ({
   title: 'Conversation 1',
   createdAt: nowIso(),
   units: createInitialUnits(),
+  summary: '',
+  summaryUpdatedAt: '',
+  summaryLoading: false,
+  summaryError: '',
+  summaryCacheKey: '',
 })
 
 const findConversationIndex = (state: ContextStoreState, conversationId: string) =>
@@ -110,11 +128,18 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       units: (baseUnits && baseUnits.length
         ? baseUnits.map((u) => ({ ...u })) // preserve ids when branching
         : createInitialUnits()),
+      summary: '',
+      summaryUpdatedAt: '',
+      summaryLoading: false,
+      summaryError: '',
+      summaryCacheKey: '',
     }
     set((state) => ({
       conversations: [...state.conversations, newConv],
       activeConversationId: newConv.id,
     }))
+    // Kick off initial summary generation for the new conversation
+    queueMicrotask(() => get().requestSummaryRefresh(newConv.id, true))
     return newConv.id
   },
   deleteConversation: (conversationId) => {
@@ -132,7 +157,11 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       conversations: state.conversations.map((c) => (c.id === conversationId ? { ...c, title: nextTitle.trim() || c.title } : c)),
     }))
   },
-  setActiveConversation: (conversationId) => set(() => ({ activeConversationId: conversationId })),
+  setActiveConversation: (conversationId) => {
+    set(() => ({ activeConversationId: conversationId }))
+    // Ensure summary exists for the newly active conversation
+    queueMicrotask(() => get().requestSummaryRefresh(conversationId))
+  },
 
   addUnit: (unit) =>
     set((state) => {
@@ -140,6 +169,8 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       if (idx === -1) return state
       const conversations = [...state.conversations]
       conversations[idx] = { ...conversations[idx], units: [...conversations[idx].units, unit] }
+      // Trigger summary regeneration (debounced)
+      queueMicrotask(() => get().requestSummaryRefresh(conversations[idx].id))
       return { conversations }
     }),
   togglePin: (id) =>
@@ -149,6 +180,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       const units = state.conversations[idx].units.map((u) => (u.id === id ? { ...u, pinned: !u.pinned } : u))
       const conversations = [...state.conversations]
       conversations[idx] = { ...conversations[idx], units }
+      queueMicrotask(() => get().requestSummaryRefresh(conversations[idx].id))
       return { conversations }
     }),
   toggleRemoved: (id) =>
@@ -160,6 +192,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       )
       const conversations = [...state.conversations]
       conversations[idx] = { ...conversations[idx], units }
+      queueMicrotask(() => get().requestSummaryRefresh(conversations[idx].id))
       return { conversations }
     }),
   updateUnit: (id, newContent) =>
@@ -169,6 +202,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       const units = state.conversations[idx].units.map((u) => (u.id === id ? { ...u, content: newContent } : u))
       const conversations = [...state.conversations]
       conversations[idx] = { ...conversations[idx], units }
+      queueMicrotask(() => get().requestSummaryRefresh(conversations[idx].id))
       return { conversations }
     }),
 
@@ -233,8 +267,50 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       })
       const conversations = [...state.conversations]
       conversations[idx] = { ...conv, units: nextUnits }
+      queueMicrotask(() => get().requestSummaryRefresh(conversationId))
       return { conversations }
     })
+  },
+  insertAssistantAfterGetId: (conversationId, afterUnitId, content) => {
+    let newAssistantId = ''
+    set((state) => {
+      const idx = findConversationIndex(state as any, conversationId)
+      if (idx === -1) return state
+      const conv = state.conversations[idx]
+      const insertIndex = conv.units.findIndex((u) => u.id === afterUnitId)
+      if (insertIndex === -1) return state
+      const nextUnits = [...conv.units]
+      newAssistantId = randomId()
+      nextUnits.splice(insertIndex + 1, 0, {
+        id: newAssistantId,
+        type: 'assistant',
+        content,
+        tags: [],
+        pinned: false,
+        removed: false,
+        timestamp: nowIso(),
+      })
+      const conversations = [...state.conversations]
+      conversations[idx] = { ...conv, units: nextUnits }
+      return { conversations }
+    })
+    // Debounced summary refresh
+    queueMicrotask(() => get().requestSummaryRefresh(conversationId))
+    return newAssistantId
+  },
+  updateUnitInConversation: (conversationId, unitId, newContent, options) => {
+    set((state) => {
+      const idx = findConversationIndex(state as any, conversationId)
+      if (idx === -1) return state
+      const conv = state.conversations[idx]
+      const units = conv.units.map((u) => (u.id === unitId ? { ...u, content: newContent } : u))
+      const conversations = [...state.conversations]
+      conversations[idx] = { ...conv, units }
+      return { conversations }
+    })
+    if (!options?.suppressSummaryRefresh) {
+      queueMicrotask(() => get().requestSummaryRefresh(conversationId))
+    }
   },
   trimAfter: (conversationId, unitId) => {
     set((state) => {
@@ -245,6 +321,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       if (cutIndex === -1) return state
       const conversations = [...state.conversations]
       conversations[idx] = { ...conv, units: conv.units.slice(0, cutIndex + 1) }
+      queueMicrotask(() => get().requestSummaryRefresh(conversationId))
       return { conversations }
     })
   },
@@ -258,6 +335,8 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       parentConversationId: conversationId,
       forkedFromUnitId: unitId,
     })
+    // Trigger summary for the new branch (debounced)
+    queueMicrotask(() => get().requestSummaryRefresh(newId))
     return newId
   },
 
@@ -283,6 +362,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       const units = conv.units.map((u) => (u.id === modal.unitId ? { ...u, content: modal.newContent } : u))
       const conversations = [...s.conversations]
       conversations[idx] = { ...conv, units }
+      queueMicrotask(() => get().requestSummaryRefresh(modal.conversationId))
       return { conversations, editModal: null }
     })
   },
@@ -310,6 +390,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
         },
       }
     })
+    queueMicrotask(() => get().requestSummaryRefresh(modal.conversationId))
   },
   applyEditBranch: (title) => {
     const state = get()
@@ -336,6 +417,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
         editedUnitId: modal.unitId,
       },
     }))
+    queueMicrotask(() => get().requestSummaryRefresh(newConversationId))
   },
   applyRemoveDoNothing: () => {
     const state = get()
@@ -349,6 +431,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       const units = conv.units.map((u) => (u.id === modal.unitId ? { ...u, removed: true, pinned: false } : u))
       const conversations = [...s.conversations]
       conversations[idx] = { ...conv, units }
+      queueMicrotask(() => get().requestSummaryRefresh(modal.conversationId))
       return { conversations, removeModal: null }
     })
   },
@@ -356,7 +439,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
     const state = get()
     const modal = state.removeModal
     if (!modal) return
-    // Remove, trim after, request regeneration
+    // Remove, trim after — no regeneration on delete
     set((s) => {
       const idx = findConversationIndex(s as any, modal.conversationId)
       if (idx === -1) return { removeModal: null }
@@ -369,19 +452,15 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
       return {
         conversations,
         removeModal: null,
-        regenerationRequest: {
-          mode: 'trim',
-          targetConversationId: modal.conversationId,
-          editedUnitId: modal.unitId,
-        },
       }
     })
+    queueMicrotask(() => get().requestSummaryRefresh(modal.conversationId))
   },
   applyRemoveBranch: (title) => {
     const state = get()
     const modal = state.removeModal
     if (!modal) return
-    // Mark removed in source, branch from it, request regeneration in new conversation
+    // Mark removed in source, branch from it — no regeneration on delete
     set((s) => {
       const idx = findConversationIndex(s as any, modal.conversationId)
       if (idx === -1) return { removeModal: null }
@@ -395,14 +474,137 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
     set(() => ({
       removeModal: null,
       activeConversationId: newConversationId,
-      regenerationRequest: {
-        mode: 'branch',
-        targetConversationId: newConversationId,
-        editedUnitId: modal.unitId,
-      },
     }))
+    queueMicrotask(() => get().requestSummaryRefresh(newConversationId))
+  },
+
+  // Summary generation API
+  requestSummaryRefresh: (conversationId, immediate = false, force = false) => {
+    const DEBOUNCE_MS = 500
+    if (!conversationId) return
+    clearTimeout(summaryDebounceTimers.get(conversationId))
+    if (immediate) {
+      void generateSummary(conversationId, force)
+      return
+    }
+    const tid = window.setTimeout(() => {
+      void generateSummary(conversationId, force)
+    }, DEBOUNCE_MS)
+    summaryDebounceTimers.set(conversationId, tid)
   },
 }))
+
+
+// Summary helpers (module scope)
+const summaryDebounceTimers = new Map<string, number>()
+
+function buildSummarySource(units: ContextUnit[]): { text: string; cacheKey: string; hasContent: boolean } {
+  const sorted = [...units].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+  const visible = sorted.filter((u) => !u.removed)
+  // Exclude system messages entirely; focus on user and assistant. Notes are treated as assistant context-light.
+  const filtered = visible.filter((u) => u.type === 'user' || u.type === 'assistant')
+  const hasContent = filtered.length > 0
+  const MAX_USER_CHARS_PER_MSG = 600
+  const MAX_ASSISTANT_CHARS_PER_MSG = 240
+  const lines = filtered.map((u) => {
+    const role = u.type === 'user' ? 'USER' : 'ASSISTANT'
+    const limit = u.type === 'user' ? MAX_USER_CHARS_PER_MSG : MAX_ASSISTANT_CHARS_PER_MSG
+    const content = u.content.length > limit ? `${u.content.slice(0, limit)}…` : u.content
+    return `${role}: ${content}`
+  })
+  const joined = lines.join('\n')
+  // Length limit for request payload
+  const MAX_CHARS = 4000
+  const text = joined.length > MAX_CHARS ? joined.slice(-MAX_CHARS) : joined
+  // Simple cache key from filtered content
+  const cacheKey = `${filtered.length}|${text}`
+  return { text, cacheKey, hasContent }
+}
+
+async function generateSummary(conversationId: string, force = false): Promise<void> {
+  const state = useContextStore.getState()
+  const conv = state.conversations.find((c) => c.id === conversationId)
+  if (!conv) return
+  const { text, cacheKey, hasContent } = buildSummarySource(conv.units)
+  if (!hasContent) {
+    // No user/assistant content to summarize; keep the summary empty
+    useContextStore.setState((s) => {
+      const idx = s.conversations.findIndex((c) => c.id === conversationId)
+      if (idx === -1) return {}
+      const conversations = [...s.conversations]
+      conversations[idx] = {
+        ...conversations[idx],
+        summary: '',
+        summaryUpdatedAt: nowIso(),
+        summaryLoading: false,
+        summaryError: '',
+        summaryCacheKey: cacheKey,
+      }
+      return { conversations }
+    })
+    return
+  }
+  if (!force && conv.summaryCacheKey === cacheKey && (conv.summary || '') !== '') {
+    // Nothing changed; skip
+    return
+  }
+  // Set loading
+  useContextStore.setState((s) => {
+    const idx = s.conversations.findIndex((c) => c.id === conversationId)
+    if (idx === -1) return {}
+    const conversations = [...s.conversations]
+    conversations[idx] = { ...conversations[idx], summaryLoading: true, summaryError: '' }
+    return { conversations }
+  })
+
+  try {
+    const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
+    if (!apiKey) throw new Error('Missing VITE_OPENAI_API_KEY')
+    const systemInstruction = 'Write a single short paragraph summarizing the conversation. Prioritize user inputs and intentions; compress assistant responses heavily; ignore any system prompts. Output only a neutral, third-person, declarative summary. Do not ask questions, give instructions, greet, or include meta commentary. If content is insufficient to summarize, return an empty string.'
+    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        temperature: 0,
+        messages: [
+          { role: 'system', content: systemInstruction },
+          { role: 'user', content: text || 'No content.' },
+        ],
+      }),
+    })
+    if (!response.ok) throw new Error(`OpenAI error: ${response.status}`)
+    const data: any = await response.json()
+    const summaryText: string = (data?.choices?.[0]?.message?.content ?? '').trim()
+
+    useContextStore.setState((s) => {
+      const idx = s.conversations.findIndex((c) => c.id === conversationId)
+      if (idx === -1) return {}
+      const conversations = [...s.conversations]
+      conversations[idx] = {
+        ...conversations[idx],
+        summary: summaryText || 'Summary unavailable.',
+        summaryUpdatedAt: nowIso(),
+        summaryLoading: false,
+        summaryError: '',
+        summaryCacheKey: cacheKey,
+      }
+      return { conversations }
+    })
+  } catch (e: any) {
+    useContextStore.setState((s) => {
+      const idx = s.conversations.findIndex((c) => c.id === conversationId)
+      if (idx === -1) return {}
+      const conversations = [...s.conversations]
+      conversations[idx] = {
+        ...conversations[idx],
+        summaryLoading: false,
+        summaryError: e?.message || 'Failed to generate summary',
+      }
+      return { conversations }
+    })
+  }
+}
 
 
 

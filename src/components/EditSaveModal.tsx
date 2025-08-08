@@ -64,7 +64,7 @@ export function EditSaveModal() {
             <div className="text-xs text-zinc-200">
               {isEditOpen
                 ? 'Save the edit, delete messages after it, and regenerate the assistant reply.'
-                : 'Remove the message, delete messages after it, and regenerate the assistant reply.'}
+                : 'Remove the message and delete messages after it.'}
             </div>
           </button>
 
@@ -72,9 +72,9 @@ export function EditSaveModal() {
             <div className="mb-2">
               <div className="font-medium">Branch Conversation</div>
               <div className="text-xs text-zinc-400">
-                {isEditOpen
-                  ? 'Save the edit, create a new conversation fork up to this point, and regenerate the assistant reply there.'
-                  : 'Remove the message, create a new conversation fork up to this point, and regenerate the assistant reply there.'}
+              {isEditOpen
+                ? 'Save the edit, create a new conversation fork up to this point, and regenerate the assistant reply there.'
+                : 'Remove the message and create a new conversation fork up to this point.'}
               </div>
             </div>
             <input

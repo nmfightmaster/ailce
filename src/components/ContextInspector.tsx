@@ -1,32 +1,13 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useContextStore } from '../store/useContextStore'
 import type { ContextUnit, Conversation } from '../store/useContextStore'
 import { ContextUnitItem } from './ContextUnitItem'
 import { Window } from './Window'
 
-function Tag({ label }: { label: string }) {
-  return (
-    <span className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-zinc-400">
-      {label}
-    </span>
-  )
-}
-
-function TypeBadge({ type }: { type: ContextUnit['type'] }) {
-  const map: Record<ContextUnit['type'], string> = {
-    user: 'text-sky-300 bg-sky-500/15',
-    assistant: 'text-emerald-300 bg-emerald-500/15',
-    system: 'text-zinc-300 bg-zinc-500/15',
-    note: 'text-amber-300 bg-amber-500/15',
-  }
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${map[type]}`}>{type}</span>
-  )
-}
-
 export function ContextInspector() {
   const conversations = useContextStore((s) => s.conversations)
   const activeConversationId = useContextStore((s) => s.activeConversationId)
+  const requestSummaryRefresh = useContextStore((s) => s.requestSummaryRefresh)
 
   const activeConversation: Conversation | undefined = useMemo(
     () => conversations.find((c) => c.id === activeConversationId) || conversations[0],
@@ -38,16 +19,42 @@ export function ContextInspector() {
 
   const unitItem = (u: ContextUnit) => <ContextUnitItem key={u.id} unit={u} />
 
+  // Kick off summary generation on mount/when switching conversations if missing
+  useEffect(() => {
+    if (!activeConversation) return
+    if (!activeConversation.summary && !activeConversation.summaryLoading) {
+      requestSummaryRefresh(activeConversation.id)
+    }
+  }, [activeConversation?.id])
+
   return (
-    <Window title="Context Inspector">
-      <div className="flex-1 overflow-y-auto p-3">
+    <Window title="Context Inspector" bodyClassName="flex flex-col">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3">
         <div className="mb-4 space-y-2">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Summary</h3>
-          <ul className="list-inside list-disc space-y-1 text-sm text-zinc-300">
-            <li>Maintain clean, minimalist, fun UI</li>
-            <li>Left: chat, Right: context inspector</li>
-            <li>Removed items excluded; pins are prioritized</li>
-          </ul>
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Summary</h3>
+            <div className="flex items-center gap-2">
+              {activeConversation?.summaryLoading && (
+                <span className="text-[11px] text-zinc-400">Generating…</span>
+              )}
+              <button
+                onClick={() => activeConversation && requestSummaryRefresh(activeConversation.id, true, true)}
+                className="rounded-md bg-white/10 px-2 py-1 text-xs text-zinc-200 hover:bg-white/20"
+                title="Regenerate summary"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+            <div className="text-sm leading-relaxed text-zinc-200">
+              {activeConversation?.summaryError ? (
+                <span className="text-rose-300/90">Summary unavailable.</span>
+              ) : (
+                <span className="whitespace-pre-wrap">{activeConversation?.summary || ' '}</span>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="space-y-3">

@@ -4,3 +4,10 @@
 html, body, #root {
   height: 100%;
 }
+
+/* Prevent page-level scrolling; panels manage their own overflow */
+body {
+  overflow: hidden;
+}
+
+body { overflow: hidden; }

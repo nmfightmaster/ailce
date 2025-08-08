@@ -55,15 +55,21 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
 
   const onSave = () => {
     const trimmed = draft.trim()
-    // Enforce editing only for user messages; disable for assistant/system/note
-    if (unit.type !== 'user') {
+    // User messages go through the edit modal (trim/branch options)
+    if (unit.type === 'user') {
+      openEditModal(activeConversationId, unit.id, trimmed)
       setIsEditing(false)
-      setDraft(unit.content)
       return
     }
-    // Open edit modal to choose how to apply the change
-    openEditModal(activeConversationId, unit.id, trimmed)
+    // Allow editing system message directly; no trim/branch flow
+    if (unit.type === 'system') {
+      updateUnit(unit.id, trimmed)
+      setIsEditing(false)
+      return
+    }
+    // For assistant/note, do not allow edits; reset
     setIsEditing(false)
+    setDraft(unit.content)
   }
 
   const onCancel = () => {
@@ -82,7 +88,7 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
             {new Date(unit.timestamp).toLocaleTimeString()}
           </span>
         </div>
-        {unit.type === 'user' && (
+        {(unit.type === 'user' || unit.type === 'system') && (
           <div className="flex items-center gap-1">
             <button
               onClick={() => {
@@ -94,26 +100,30 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
             >
               Edit
             </button>
-            <button
-              onClick={() => togglePin(unit.id)}
-              className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.pinned ? 'bg-yellow-500 text-black' : 'bg-white/10 text-zinc-300 hover:bg-white/20'}`}
-              title={unit.pinned ? 'Unpin' : 'Pin'}
-            >
-              {unit.pinned ? 'Pinned' : 'Pin'}
-            </button>
-            <button
-              onClick={() => {
-                if (unit.removed) {
-                  toggleRemoved(unit.id)
-                } else {
-                  openRemoveModal(activeConversationId, unit.id)
-                }
-              }}
-              className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.removed ? 'bg-emerald-500 text-black' : 'bg-rose-500/80 text-white hover:bg-rose-500'}`}
-              title={unit.removed ? 'Restore' : 'Remove from context'}
-            >
-              {unit.removed ? 'Restore' : 'Remove'}
-            </button>
+            {unit.type === 'user' && (
+              <>
+                <button
+                  onClick={() => togglePin(unit.id)}
+                  className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.pinned ? 'bg-yellow-500 text-black' : 'bg-white/10 text-zinc-300 hover:bg-white/20'}`}
+                  title={unit.pinned ? 'Unpin' : 'Pin'}
+                >
+                  {unit.pinned ? 'Pinned' : 'Pin'}
+                </button>
+                <button
+                  onClick={() => {
+                    if (unit.removed) {
+                      toggleRemoved(unit.id)
+                    } else {
+                      openRemoveModal(activeConversationId, unit.id)
+                    }
+                  }}
+                  className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.removed ? 'bg-emerald-500 text-black' : 'bg-rose-500/80 text-white hover:bg-rose-500'}`}
+                  title={unit.removed ? 'Restore' : 'Remove from context'}
+                >
+                  {unit.removed ? 'Restore' : 'Remove'}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
