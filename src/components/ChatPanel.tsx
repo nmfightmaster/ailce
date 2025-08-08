@@ -7,6 +7,8 @@ import { Window } from './Window'
 import { useThemeStore } from '../store/useThemeStore'
 import type { ThemeState } from '../store/useThemeStore'
 import { countTokensForText } from '../utils/tokenUtils'
+import { useSettingsStore } from '../store/useSettingsStore'
+import { ModelSelector } from './ModelSelector'
 
 function roleLabel(role: ContextUnit['type'], assistantName: string) {
   if (role === 'user') return 'You'
@@ -180,6 +182,7 @@ export function ChatPanel() {
     streamBufferRef.current = ''
 
     try {
+      const selectedModel = useSettingsStore.getState().model
       const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
       if (!apiKey) throw new Error('Missing VITE_OPENAI_API_KEY')
       const ac = new AbortController()
@@ -190,7 +193,7 @@ export function ChatPanel() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ model: 'gpt-4o-mini', stream: true, messages: params.messages }),
+        body: JSON.stringify({ model: selectedModel, stream: true, messages: params.messages }),
         signal: ac.signal,
       })
       if (!response.ok || !response.body) throw new Error(`OpenAI error: ${response.status}`)
@@ -433,8 +436,10 @@ export function ChatPanel() {
 
         <div className="border-t border-white/10 p-3">
           {hasSystemMessage ? (
-            <div className="flex items-stretch gap-2">
-              <textarea
+            <div className="space-y-2">
+              <div className="flex items-center"><ModelSelector /></div>
+              <div className="flex items-stretch gap-2">
+                <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -448,17 +453,19 @@ export function ChatPanel() {
                 placeholder="Type a message..."
                 rows={2}
                 className="min-h-10 w-full resize-y rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
-              />
-              <button
+                />
+                <button
                 onClick={handleSend}
                 disabled={isRequestInFlight}
                 className="shrink-0 rounded-lg bg-sky-500 px-4 text-sm font-medium text-white shadow-soft hover:bg-sky-400 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-sky-500/50 self-stretch flex items-center justify-center"
               >
                 {isRequestInFlight ? 'Sending…' : 'Send'}
-              </button>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="space-y-2">
+              <div className="flex items-center"><ModelSelector /></div>
               <div className="text-xs text-zinc-400">Set a system message to start this conversation.</div>
               <div className="flex items-stretch gap-2">
                 <textarea

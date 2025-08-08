@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { countTokensForText } from '../utils/tokenUtils'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { useSettingsStore } from './useSettingsStore'
 
 export type ContextUnitType = 'user' | 'assistant' | 'system' | 'note'
 
@@ -764,7 +765,7 @@ async function generateSummary(conversationId: string, force = false): Promise<v
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
+        model: useSettingsStore.getState().model || 'gpt-4o-mini',
         temperature: 0,
         messages: [
           { role: 'system', content: systemInstruction },

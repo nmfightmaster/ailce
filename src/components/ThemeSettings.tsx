@@ -248,7 +248,7 @@ export function ThemeSettings() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="w-[720px] max-w-[92vw] rounded-xl border border-white/10 bg-zinc-900 p-4 shadow-2xl">
+      <div className="w-[720px] max-w-[92vw] max-h-[92vh] overflow-hidden rounded-xl border border-white/10 bg-zinc-900 p-4 shadow-2xl">
         <div className="mb-3 flex items-center justify-between">
           <h3 className="text-base font-semibold">Theme & Chat Settings</h3>
           <button onClick={closeSettings} className="rounded-md bg-white/10 px-2 py-1 text-xs text-zinc-200 hover:bg-white/20">Close</button>
@@ -257,7 +257,7 @@ export function ThemeSettings() {
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="space-y-3">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Colors</h4>
-            <div className="grid grid-cols-2 items-start gap-2 text-xs">
+            <div className="grid grid-cols-2 items-start gap-2 text-xs max-h-[60vh] overflow-y-auto pr-1">
               <ColorControl label="User bubble bg" value={draft.userBubbleBg} onChange={(v) => setDraft({ ...draft, userBubbleBg: v })} />
               <ColorControl label="User bubble text" value={draft.userBubbleText} onChange={(v) => setDraft({ ...draft, userBubbleText: v })} />
               {warnUser && <div className="col-span-2 text-[11px] text-amber-300">Low contrast for User bubble (ratio {userContrast?.toFixed(2)}). Aim for ≥ 4.5:1.</div>}
@@ -280,7 +280,7 @@ export function ThemeSettings() {
               <ColorControl label="Remaining token color" value={draft.remainingTokenColor} onChange={(v) => setDraft({ ...draft, remainingTokenColor: v })} />
             </div>
 
-            <h4 className="mt-4 text-xs font-semibold uppercase tracking-wide text-zinc-400">Assistant name</h4>
+            <h4 className="mt-2 text-xs font-semibold uppercase tracking-wide text-zinc-400">Assistant name</h4>
             <input
               type="text"
               value={draft.assistantName}
@@ -293,6 +293,11 @@ export function ThemeSettings() {
           <div className="space-y-3">
             <h4 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Preview</h4>
             <div className="rounded-lg border border-white/10 bg-white/5 p-3 space-y-3">
+              {/* Header & secondary text samples */}
+              <div>
+                <div className="text-sm font-semibold" style={{ color: draft.headerText }}>Header text sample</div>
+                <div className="text-xs" style={{ color: draft.secondaryText }}>Secondary text sample</div>
+              </div>
               <div className="flex items-center gap-3">
                 <span
                   className="rounded-full px-2.5 py-1 text-xs font-medium"
@@ -317,6 +322,20 @@ export function ThemeSettings() {
               <div className="flex items-center gap-2 text-xs">
                 <span className="rounded-md px-2 py-1 text-black" style={{ background: draft.pinnedHighlight }}>Pinned</span>
                 <span className="rounded-md px-2 py-1" style={{ background: draft.removedDim, color: '#111' }}>Removed</span>
+              </div>
+              {/* Token usage bar demonstrating user/assistant/remaining colors and bar bg */}
+              <div className="space-y-1">
+                <div className="text-[11px] text-zinc-400">Token usage</div>
+                <div className="h-2 w-full overflow-hidden rounded relative" style={{ background: draft.tokenBarBg }}>
+                  <div className="h-full absolute left-0 top-0" style={{ width: '35%', background: draft.userTokenColor }} />
+                  <div className="h-full absolute left-[35%] top-0" style={{ width: '25%', background: draft.assistantTokenColor }} />
+                  <div className="h-full absolute left-[60%] top-0" style={{ width: '40%', background: draft.remainingTokenColor }} />
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                  <span>User</span>
+                  <span>Assistant</span>
+                  <span>Remaining</span>
+                </div>
               </div>
             </div>
           </div>
