@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useContextStore } from '../store/useContextStore'
 import type { ContextUnit } from '../store/useContextStore'
 
@@ -20,6 +20,44 @@ export function ChatPanel() {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
   }, [units.length])
 
+  const assembleMessages = (allUnits: ContextUnit[]) => {
+    if (!allUnits || allUnits.length === 0) return [] as { role: 'system' | 'user' | 'assistant'; content: string }[]
+
+    const sorted = [...allUnits].sort(
+      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+    )
+
+    const lastUser = [...sorted]
+      .filter((u) => u.type === 'user')
+      .reduce<ContextUnit | null>((acc, cur) => {
+        if (!acc) return cur
+        return new Date(cur.timestamp).getTime() >= new Date(acc.timestamp).getTime() ? cur : acc
+      }, null)
+
+    const lastUserTime = lastUser ? new Date(lastUser.timestamp).getTime() : null
+
+    const removedBeforeLastUser = lastUser
+      ? sorted.filter(
+          (u) => u.removed && new Date(u.timestamp).getTime() < (lastUserTime as number)
+        )
+      : []
+
+    const forgetMessages = removedBeforeLastUser.map((u) => ({
+      role: 'system' as const,
+      content: `Note: Forget any earlier mention of '${u.content}'. It is incorrect or irrelevant.`,
+    }))
+
+    const nonRemoved = sorted.filter((u) => !u.removed)
+    const mainMessages = nonRemoved.map((u) => ({
+      role: (u.type === 'note' ? 'system' : (u.type as 'system' | 'user' | 'assistant')),
+      content: u.content,
+    }))
+
+    return [...forgetMessages, ...mainMessages]
+  }
+
+  const messagesPreview = useMemo(() => assembleMessages(units), [units])
+
   const handleSend = async () => {
     const trimmed = input.trim()
     if (!trimmed) return
@@ -38,15 +76,7 @@ export function ChatPanel() {
 
     try {
       const currentUnits = useContextStore.getState().units
-      const nonRemoved = currentUnits
-        .filter((u) => !u.removed)
-        .sort(
-          (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-        )
-      const messages = nonRemoved.map((u) => ({
-        role: u.type === 'note' ? 'system' : (u.type as 'system' | 'user' | 'assistant'),
-        content: u.content,
-      }))
+      const messages = assembleMessages(currentUnits)
 
       const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
       if (!apiKey) {
@@ -144,6 +174,14 @@ export function ChatPanel() {
             {isRequestInFlight ? 'Sending…' : 'Send'}
           </button>
         </div>
+        {import.meta.env.DEV && (
+          <details className="mt-3 rounded-lg border border-white/10 bg-zinc-900/70 p-3 text-xs text-zinc-300">
+            <summary className="cursor-pointer select-none text-zinc-200">View assembled API context</summary>
+            <pre className="mt-2 max-h-64 overflow-auto rounded bg-black/40 p-2 text-[11px] leading-snug text-zinc-200">
+              {JSON.stringify(messagesPreview, null, 2)}
+            </pre>
+          </details>
+        )}
       </div>
     </div>
   )
