@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useContextStore } from '../store/useContextStore'
-import type { ContextUnit } from '../store/useContextStore'
+import type { ContextUnit, Conversation } from '../store/useContextStore'
 import { ContextUnitItem } from './ContextUnitItem'
 
 function Tag({ label }: { label: string }) {
@@ -24,8 +24,15 @@ function TypeBadge({ type }: { type: ContextUnit['type'] }) {
 }
 
 export function ContextInspector() {
-  const units = useContextStore((s) => s.units)
+  const conversations = useContextStore((s) => s.conversations)
+  const activeConversationId = useContextStore((s) => s.activeConversationId)
   const [showRemoved, setShowRemoved] = useState(false)
+
+  const activeConversation: Conversation | undefined = useMemo(
+    () => conversations.find((c) => c.id === activeConversationId) || conversations[0],
+    [conversations, activeConversationId]
+  )
+  const units = activeConversation?.units || []
 
   const visibleUnits = useMemo(
     () => units.filter((u) => (showRemoved ? true : !u.removed)),

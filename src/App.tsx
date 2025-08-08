@@ -1,5 +1,6 @@
 import { ChatPanel } from './components/ChatPanel'
 import { ContextInspector } from './components/ContextInspector'
+import { EditSaveModal } from './components/EditSaveModal'
 
 function App() {
   return (
@@ -10,6 +11,7 @@ function App() {
       <div className="lg:col-span-1 min-h-0">
         <ContextInspector />
       </div>
+      <EditSaveModal />
     </div>
   )
 }

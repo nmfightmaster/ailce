@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useContextStore } from '../store/useContextStore'
-import type { ContextUnit } from '../store/useContextStore'
+import type { ContextUnit, Conversation } from '../store/useContextStore'
 
 function roleLabel(role: ContextUnit['type']) {
   if (role === 'user') return 'You'
@@ -9,16 +9,32 @@ function roleLabel(role: ContextUnit['type']) {
 }
 
 export function ChatPanel() {
-  const units = useContextStore((s) => s.units)
+  const conversations = useContextStore((s) => s.conversations)
+  const activeConversationId = useContextStore((s) => s.activeConversationId)
+  const setActiveConversation = useContextStore((s) => s.setActiveConversation)
+  const renameConversation = useContextStore((s) => s.renameConversation)
+  const createConversation = useContextStore((s) => s.createConversation)
+  const deleteConversation = useContextStore((s) => s.deleteConversation)
   const addUnit = useContextStore((s) => s.addUnit)
+  const assembleMessagesFromStore = useContextStore((s) => s.assembleMessages)
+  const regenerationRequest = useContextStore((s) => s.regenerationRequest)
+  const clearRegenerationRequest = useContextStore((s) => s.clearRegenerationRequest)
+  const insertAssistantAfter = useContextStore((s) => s.insertAssistantAfter)
 
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const [isRequestInFlight, setIsRequestInFlight] = useState(false)
 
+  const activeConversation: Conversation | undefined = useMemo(
+    () => conversations.find((c) => c.id === activeConversationId) || conversations[0],
+    [conversations, activeConversationId]
+  )
+
+  const units = activeConversation?.units || []
+
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
-  }, [units.length])
+  }, [units.length, activeConversation?.id])
 
   const assembleMessages = (allUnits: ContextUnit[]) => {
     if (!allUnits || allUnits.length === 0) return [] as { role: 'system' | 'user' | 'assistant'; content: string }[]
@@ -75,8 +91,8 @@ export function ChatPanel() {
     setIsRequestInFlight(true)
 
     try {
-      const currentUnits = useContextStore.getState().units
-      const messages = assembleMessages(currentUnits)
+      const currentConversationId = useContextStore.getState().activeConversationId || (useContextStore.getState().conversations[0]?.id ?? '')
+      const messages = assembleMessagesFromStore(currentConversationId)
 
       const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
       if (!apiKey) {
@@ -125,6 +141,34 @@ export function ChatPanel() {
     }
   }
 
+  // Handle regeneration flow for Trim and Branch
+  useEffect(() => {
+    const req = regenerationRequest
+    if (!req) return
+    const run = async () => {
+      try {
+        const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
+        if (!apiKey) throw new Error('Missing VITE_OPENAI_API_KEY')
+        const messages = assembleMessagesFromStore(req.targetConversationId, req.editedUnitId)
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+          body: JSON.stringify({ model: 'gpt-4o-mini', messages }),
+        })
+        if (!response.ok) throw new Error(`OpenAI error: ${response.status}`)
+        const data: any = await response.json()
+        const aiText: string = data?.choices?.[0]?.message?.content ?? ''
+        insertAssistantAfter(req.targetConversationId, req.editedUnitId, aiText || '[Error: failed to get response]')
+      } catch (e) {
+        insertAssistantAfter(req.targetConversationId, req.editedUnitId, '[Error: failed to get response]')
+      } finally {
+        clearRegenerationRequest()
+      }
+    }
+    void run()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regenerationRequest])
+
   const messageItem = (m: ContextUnit) => (
     <div key={m.id} className="flex gap-3">
       <div
@@ -144,11 +188,76 @@ export function ChatPanel() {
     </div>
   )
 
+  const [conversationTitleDraft, setConversationTitleDraft] = useState('')
+
+  const handleCreateConversation = () => {
+    const title = conversationTitleDraft.trim() || undefined
+    createConversation(title)
+    setConversationTitleDraft('')
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-white/10 px-4 py-3">
-        <h1 className="text-lg font-semibold tracking-tight">Live Context Editor</h1>
-        <p className="text-xs text-zinc-400">Chat on the left. Curate context on the right.</p>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">Live Context Editor</h1>
+            <p className="text-xs text-zinc-400">Chat on the left. Curate context on the right.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              value={conversationTitleDraft}
+              onChange={(e) => setConversationTitleDraft(e.target.value)}
+              placeholder="New conversation title"
+              className="hidden md:block w-52 rounded-md border border-white/10 bg-white/5 p-1.5 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+            />
+            <button
+              onClick={handleCreateConversation}
+              className="rounded-md bg-sky-500 px-2.5 py-1.5 text-xs font-medium text-black hover:bg-sky-400"
+            >
+              New Conversation
+            </button>
+          </div>
+        </div>
+        <div className="mt-3 flex items-center gap-2 overflow-x-auto">
+          {conversations.map((c) => {
+            const isActive = c.id === activeConversation?.id
+            const parent = c.parentConversationId
+              ? conversations.find((x) => x.id === c.parentConversationId)
+              : undefined
+            return (
+              <div key={c.id} className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${isActive ? 'border-sky-500/40 bg-sky-500/10 text-sky-200' : 'border-white/10 bg-white/5 text-zinc-300'}`}>
+                <button
+                  className="truncate max-w-[12rem] flex items-center gap-1"
+                  title={parent ? `${c.title} (forked from: ${parent.title})` : c.title}
+                  onClick={() => setActiveConversation(c.id)}
+                >
+                  {c.title}
+                  {parent && <span title="Forked" className="text-[10px]">↗</span>}
+                </button>
+                <button
+                  className="text-[10px] text-zinc-400 hover:text-zinc-200"
+                  title="Rename"
+                  onClick={() => {
+                    const next = prompt('Rename conversation', c.title)
+                    if (next && next.trim()) renameConversation(c.id, next)
+                  }}
+                >
+                  ✎
+                </button>
+                <button
+                  className="text-[10px] text-rose-400 hover:text-rose-300"
+                  title="Delete"
+                  onClick={() => {
+                    if (confirm('Delete this conversation?')) deleteConversation(c.id)
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
       <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">

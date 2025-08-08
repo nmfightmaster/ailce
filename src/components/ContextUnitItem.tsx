@@ -24,6 +24,8 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
   const togglePin = useContextStore((s) => s.togglePin)
   const toggleRemoved = useContextStore((s) => s.toggleRemoved)
   const updateUnit = useContextStore((s) => s.updateUnit)
+  const openEditModal = useContextStore((s) => s.openEditModal)
+  const activeConversationId = useContextStore((s) => s.activeConversationId)
 
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(unit.content)
@@ -51,7 +53,14 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
 
   const onSave = () => {
     const trimmed = draft.trim()
-    updateUnit(unit.id, trimmed)
+    // Enforce editing only for user messages; disable for assistant/system/note
+    if (unit.type !== 'user') {
+      setIsEditing(false)
+      setDraft(unit.content)
+      return
+    }
+    // Open edit modal to choose how to apply the change
+    openEditModal(activeConversationId, unit.id, trimmed)
     setIsEditing(false)
   }
 
@@ -77,8 +86,9 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
               setIsEditing(true)
               setIsExpanded(true)
             }}
-            className="rounded-md px-2 py-1 text-xs transition-colors bg-white/10 text-zinc-300 hover:bg-white/20"
-            title="Edit"
+            className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.type === 'user' ? 'bg-white/10 text-zinc-300 hover:bg-white/20' : 'bg-white/5 text-zinc-500 cursor-not-allowed'}`}
+            title={unit.type === 'user' ? 'Edit' : 'Editing disabled for this message type'}
+            disabled={unit.type !== 'user'}
           >
             Edit
           </button>
