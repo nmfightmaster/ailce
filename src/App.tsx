@@ -3,6 +3,8 @@ import { ChatPanel } from './components/ChatPanel'
 import { ContextInspector } from './components/ContextInspector'
 import { EditSaveModal } from './components/EditSaveModal'
 import { ConversationManager } from './components/ConversationManager'
+import { SummaryWindow } from './components/SummaryWindow'
+import { ThemeSettings } from './components/ThemeSettings'
 
 function App() {
   // Left/right sizing
@@ -102,11 +104,17 @@ function App() {
           className={`h-[6px] w-full cursor-row-resize bg-white/5 hover:bg-white/10 ${isDraggingRow ? 'bg-white/20' : ''}`}
           title="Resize"
         />
-        <div className="flex-1 min-h-0">
-          <ContextInspector />
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="shrink-0">
+            <SummaryWindow />
+          </div>
+          <div className="flex-1 min-h-0">
+            <ContextInspector />
+          </div>
         </div>
       </div>
       <EditSaveModal />
+      <ThemeSettings />
     </div>
   )
 }

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist, createJSONStorage } from 'zustand/middleware'
 
 export type ContextUnitType = 'user' | 'assistant' | 'system' | 'note'
 
@@ -99,7 +100,7 @@ const createInitialUnits = (): ContextUnit[] => []
 
 const createInitialConversation = (): Conversation => ({
   id: randomId(),
-  title: 'Conversation 1',
+  title: 'Welcome',
   createdAt: nowIso(),
   units: createInitialUnits(),
   summary: '',
@@ -114,9 +115,63 @@ const findConversationIndex = (state: ContextStoreState, conversationId: string)
 
 const initialConversation = createInitialConversation()
 
-export const useContextStore = create<ContextStoreState>((set, get) => ({
-  conversations: [initialConversation],
-  activeConversationId: initialConversation.id,
+// Attempt to read legacy data written by earlier, custom persistence
+function readLegacyPersisted(): { activeConversationId: string; conversations: Conversation[] } | null {
+  try {
+    if (typeof window === 'undefined') return null
+    const raw = window.localStorage.getItem('lce:conversations_v1')
+    if (!raw) return null
+    const data = JSON.parse(raw) as {
+      version?: number
+      activeConversationId?: string
+      conversations?: Conversation[]
+    } | null
+    if (!data || !Array.isArray(data.conversations)) return null
+    const conversations: Conversation[] = data.conversations.map((c) => ({
+      id: c.id || Math.random().toString(36).slice(2),
+      title: c.title || 'Conversation',
+      createdAt: c.createdAt || new Date().toISOString(),
+      parentConversationId: c.parentConversationId,
+      forkedFromUnitId: c.forkedFromUnitId,
+      units: Array.isArray(c.units)
+        ? c.units.map((u) => ({
+            id: u.id || Math.random().toString(36).slice(2),
+            type: u.type,
+            content: u.content ?? '',
+            tags: Array.isArray(u.tags) ? u.tags : [],
+            pinned: !!u.pinned,
+            removed: !!u.removed,
+            timestamp: u.timestamp || new Date().toISOString(),
+          }))
+        : [],
+      summary: c.summary || '',
+      summaryUpdatedAt: c.summaryUpdatedAt || '',
+      summaryLoading: false,
+      summaryError: '',
+      summaryCacheKey: c.summaryCacheKey || '',
+    }))
+    const activeConversationId =
+      data.activeConversationId && conversations.find((c) => c.id === data.activeConversationId)
+        ? data.activeConversationId
+        : conversations[0]?.id || ''
+    return { activeConversationId, conversations }
+  } catch {
+    return null
+  }
+}
+
+export const useContextStore = create<ContextStoreState>()(
+  persist(
+    (set, get) => ({
+      conversations: (() => {
+        // Default to legacy data if available, otherwise seed a welcome conversation
+        const legacy = readLegacyPersisted()
+        return legacy?.conversations?.length ? legacy.conversations : [initialConversation]
+      })(),
+      activeConversationId: (() => {
+        const legacy = readLegacyPersisted()
+        return legacy?.activeConversationId || initialConversation.id
+      })(),
 
   createConversation: (title, baseUnits, meta) => {
     const newConv: Conversation = {
@@ -477,7 +532,7 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
     }))
     queueMicrotask(() => get().requestSummaryRefresh(newConversationId))
   },
-
+  
   // Summary generation API
   requestSummaryRefresh: (conversationId, immediate = false, force = false) => {
     const DEBOUNCE_MS = 500
@@ -492,7 +547,54 @@ export const useContextStore = create<ContextStoreState>((set, get) => ({
     }, DEBOUNCE_MS)
     summaryDebounceTimers.set(conversationId, tid)
   },
-}))
+    }),
+    {
+      name: 'live-context-conversations',
+      version: 1,
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        activeConversationId: state.activeConversationId,
+        conversations: state.conversations.map((c) => ({
+          ...c,
+          summaryLoading: false,
+          summaryError: '',
+        })),
+      }),
+      migrate: (persisted, _version) => {
+        const base = (persisted as any) || {}
+        const rawConversations = Array.isArray(base.conversations) ? base.conversations : []
+        const conversations: Conversation[] = rawConversations.map((c: any) => ({
+          id: c?.id || Math.random().toString(36).slice(2),
+          title: c?.title || 'Conversation',
+          createdAt: c?.createdAt || new Date().toISOString(),
+          parentConversationId: c?.parentConversationId,
+          forkedFromUnitId: c?.forkedFromUnitId,
+          units: Array.isArray(c?.units)
+            ? c.units.map((u: any) => ({
+                id: u?.id || Math.random().toString(36).slice(2),
+                type: u?.type,
+                content: u?.content ?? '',
+                tags: Array.isArray(u?.tags) ? u.tags : [],
+                pinned: !!u?.pinned,
+                removed: !!u?.removed,
+                timestamp: u?.timestamp || new Date().toISOString(),
+              }))
+            : [],
+          summary: c?.summary || '',
+          summaryUpdatedAt: c?.summaryUpdatedAt || '',
+          summaryLoading: false,
+          summaryError: '',
+          summaryCacheKey: c?.summaryCacheKey || '',
+        }))
+        const activeConversationId =
+          typeof base.activeConversationId === 'string' && conversations.find((x) => x.id === base.activeConversationId)
+            ? base.activeConversationId
+            : conversations[0]?.id || ''
+        return { activeConversationId, conversations } as Partial<ContextStoreState>
+      },
+    }
+  )
+)
 
 
 // Summary helpers (module scope)

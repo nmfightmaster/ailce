@@ -4,14 +4,18 @@ import type { ContextUnit, Conversation } from '../store/useContextStore'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Window } from './Window'
+import { useThemeStore } from '../store/useThemeStore'
+import type { ThemeState } from '../store/useThemeStore'
 
-function roleLabel(role: ContextUnit['type']) {
+function roleLabel(role: ContextUnit['type'], assistantName: string) {
   if (role === 'user') return 'You'
-  if (role === 'assistant') return 'AI'
+  if (role === 'assistant') return assistantName || 'AI'
   return 'System'
 }
 
 export function ChatPanel() {
+  const assistantName = useThemeStore((s: ThemeState) => s.assistantName)
+  const openThemeSettings = useThemeStore((s: ThemeState) => s.openSettings)
   const conversations = useContextStore((s) => s.conversations)
   const activeConversationId = useContextStore((s) => s.activeConversationId)
   // Pull only what ChatPanel uses from the store
@@ -337,14 +341,14 @@ export function ChatPanel() {
         className={
           'shrink-0 select-none rounded-full px-2.5 py-1 text-xs font-medium ' +
           (m.type === 'user'
-            ? 'bg-sky-500/15 text-sky-300'
+            ? 'bg-[var(--user-bubble-bg)] text-[var(--user-bubble-text)]'
             : m.type === 'assistant'
-            ? 'bg-emerald-500/15 text-emerald-300'
+            ? 'bg-[var(--assistant-bubble-bg)] text-[var(--assistant-bubble-text)]'
             : 'bg-zinc-500/15 text-zinc-300')
         }
         title={new Date(m.timestamp).toLocaleTimeString()}
       >
-        {roleLabel(m.type)}
+        {roleLabel(m.type, assistantName)}
       </div>
       <div className="prose prose-invert max-w-none prose-pre:mt-2 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-code:text-[0.9em] prose-code:before:hidden prose-code:after:hidden">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -357,7 +361,19 @@ export function ChatPanel() {
   // no-op
 
   return (
-    <Window title="Live Context Editor" subtitle="Chat on the left. Curate context on the right.">
+    <Window
+      title="Live Context Editor"
+      subtitle="Chat on the left. Curate context on the right."
+      right={
+        <button
+          onClick={openThemeSettings}
+          className="rounded-md bg-white/10 px-3 py-1.5 text-xs text-zinc-200 hover:bg-white/20"
+          title="Theme & Chat Settings"
+        >
+          Settings
+        </button>
+      }
+    >
       <div className="flex h-full flex-col">
         <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">
           {units
@@ -367,8 +383,8 @@ export function ChatPanel() {
           {/* Thinking placeholder */}
           {isThinking && !isStreaming && (
             <div className="flex gap-3">
-              <div className="shrink-0 select-none rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-500/15 text-emerald-300">
-                AI
+              <div className="shrink-0 select-none rounded-full px-2.5 py-1 text-xs font-medium bg-[var(--assistant-bubble-bg)] text-[var(--assistant-bubble-text)]">
+                {assistantName || 'AI'}
               </div>
               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 shadow-soft">
                 <div aria-label="AI is typing…" className="flex items-center gap-1">
@@ -382,8 +398,8 @@ export function ChatPanel() {
           {/* Streaming bubble */}
           {isStreaming && (
             <div className="flex gap-3">
-              <div className="shrink-0 select-none rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-500/15 text-emerald-300">
-                AI
+              <div className="shrink-0 select-none rounded-full px-2.5 py-1 text-xs font-medium bg-[var(--assistant-bubble-bg)] text-[var(--assistant-bubble-text)]">
+                {assistantName || 'AI'}
               </div>
               <div className="prose prose-invert max-w-none prose-pre:mt-2 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-code:text-[0.9em] prose-code:before:hidden prose-code:after:hidden">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -396,7 +412,7 @@ export function ChatPanel() {
 
         <div className="border-t border-white/10 p-3">
           {hasSystemMessage ? (
-            <div className="flex items-end gap-2">
+            <div className="flex items-stretch gap-2">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -415,7 +431,7 @@ export function ChatPanel() {
               <button
                 onClick={handleSend}
                 disabled={isRequestInFlight}
-                className="h-10 shrink-0 rounded-lg bg-sky-500 px-4 text-sm font-medium text-white shadow-soft hover:bg-sky-400 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+                className="shrink-0 rounded-lg bg-sky-500 px-4 text-sm font-medium text-white shadow-soft hover:bg-sky-400 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-sky-500/50 self-stretch flex items-center justify-center"
               >
                 {isRequestInFlight ? 'Sending…' : 'Send'}
               </button>
@@ -423,7 +439,7 @@ export function ChatPanel() {
           ) : (
             <div className="space-y-2">
               <div className="text-xs text-zinc-400">Set a system message to start this conversation.</div>
-              <div className="flex items-end gap-2">
+              <div className="flex items-stretch gap-2">
                 <textarea
                   value={systemDraft}
                   onChange={(e) => setSystemDraft(e.target.value)}
@@ -439,7 +455,7 @@ export function ChatPanel() {
                 />
                 <button
                   onClick={handleSetSystem}
-                  className="h-10 shrink-0 rounded-lg bg-emerald-500 px-4 text-sm font-medium text-black shadow-soft hover:bg-emerald-400"
+                  className="shrink-0 rounded-lg bg-emerald-500 px-4 text-sm font-medium text-black shadow-soft hover:bg-emerald-400 self-stretch flex items-center justify-center"
                 >
                   Set System
                 </button>

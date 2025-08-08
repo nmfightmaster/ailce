@@ -11,3 +11,15 @@ body {
 }
 
 body { overflow: hidden; }
+
+/* Theme CSS variables with sensible defaults */
+:root {
+  --user-bubble-bg: rgb(14 165 233 / 0.15);
+  --user-bubble-text: rgb(125 211 252);
+  --assistant-bubble-bg: rgb(16 185 129 / 0.15);
+  --assistant-bubble-text: rgb(167 243 208);
+  --pinned-highlight: rgb(234 179 8);
+  --removed-dim: rgb(244 63 94 / 0.5);
+  --window-bg: rgba(255,255,255,0.05);
+  --window-text: rgba(244,244,245,0.9);
+}

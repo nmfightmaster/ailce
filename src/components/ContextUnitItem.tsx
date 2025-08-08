@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import type { ContextUnit } from '../store/useContextStore'
 import { useContextStore } from '../store/useContextStore'
+import { useThemeStore } from '../store/useThemeStore'
 
 function Tag({ label }: { label: string }) {
   return (
@@ -12,8 +13,8 @@ function Tag({ label }: { label: string }) {
 
 function TypeBadge({ type }: { type: ContextUnit['type'] }) {
   const map: Record<ContextUnit['type'], string> = {
-    user: 'text-sky-300 bg-sky-500/15',
-    assistant: 'text-emerald-300 bg-emerald-500/15',
+    user: 'text-[var(--user-bubble-text)] bg-[var(--user-bubble-bg)]',
+    assistant: 'text-[var(--assistant-bubble-text)] bg-[var(--assistant-bubble-bg)]',
     system: 'text-zinc-300 bg-zinc-500/15',
     note: 'text-amber-300 bg-amber-500/15',
   }
@@ -21,6 +22,7 @@ function TypeBadge({ type }: { type: ContextUnit['type'] }) {
 }
 
 export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
+  const assistantName = useThemeStore((s) => s.assistantName)
   const togglePin = useContextStore((s) => s.togglePin)
   const toggleRemoved = useContextStore((s) => s.toggleRemoved)
   const updateUnit = useContextStore((s) => s.updateUnit)
@@ -79,7 +81,8 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
 
   return (
     <div
-      className={`rounded-lg border p-3 ${unit.removed ? 'border-rose-500/20 bg-rose-500/5 opacity-70' : 'border-white/10 bg-white/5'} shadow-soft`}
+      className={`rounded-lg border p-3 ${unit.removed ? 'opacity-70' : ''} shadow-soft`}
+      style={unit.removed ? { borderColor: 'var(--removed-dim)', background: 'color-mix(in oklab, var(--removed-dim) 20%, transparent)' } : { borderColor: 'rgba(255,255,255,0.1)', background: 'var(--window-bg)' }}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -104,7 +107,8 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
               <>
                 <button
                   onClick={() => togglePin(unit.id)}
-                  className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.pinned ? 'bg-yellow-500 text-black' : 'bg-white/10 text-zinc-300 hover:bg-white/20'}`}
+                  className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.pinned ? 'text-black' : 'bg-white/10 text-zinc-300 hover:bg-white/20'}`}
+                  style={unit.pinned ? { background: 'var(--pinned-highlight)' } : undefined}
                   title={unit.pinned ? 'Unpin' : 'Pin'}
                 >
                   {unit.pinned ? 'Pinned' : 'Pin'}
@@ -117,7 +121,8 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
                       openRemoveModal(activeConversationId, unit.id)
                     }
                   }}
-                  className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.removed ? 'bg-emerald-500 text-black' : 'bg-rose-500/80 text-white hover:bg-rose-500'}`}
+                  className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.removed ? 'text-black' : 'text-white'}`}
+                  style={unit.removed ? { background: 'rgb(16 185 129)' } : { background: 'var(--removed-dim)' }}
                   title={unit.removed ? 'Restore' : 'Remove from context'}
                 >
                   {unit.removed ? 'Restore' : 'Remove'}
@@ -154,7 +159,7 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
           </div>
         ) : (
           <div>
-            <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-100/90">{displayText}</div>
+            <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-100/90">{unit.type === 'assistant' ? displayText.replace(/^AI:/, `${assistantName || 'AI'}:`) : displayText}</div>
             {isOverflowing && (
               <button
                 className="mt-1 text-[11px] font-medium text-sky-300 hover:text-sky-200"

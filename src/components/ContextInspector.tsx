@@ -30,33 +30,6 @@ export function ContextInspector() {
   return (
     <Window title="Context Inspector" bodyClassName="flex flex-col">
       <div className="flex-1 min-h-0 overflow-y-auto p-3">
-        <div className="mb-4 space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Summary</h3>
-            <div className="flex items-center gap-2">
-              {activeConversation?.summaryLoading && (
-                <span className="text-[11px] text-zinc-400">Generating…</span>
-              )}
-              <button
-                onClick={() => activeConversation && requestSummaryRefresh(activeConversation.id, true, true)}
-                className="rounded-md bg-white/10 px-2 py-1 text-xs text-zinc-200 hover:bg-white/20"
-                title="Regenerate summary"
-              >
-                Refresh
-              </button>
-            </div>
-          </div>
-          <div className="rounded-lg border border-white/10 bg-white/5 p-3">
-            <div className="text-sm leading-relaxed text-zinc-200">
-              {activeConversation?.summaryError ? (
-                <span className="text-rose-300/90">Summary unavailable.</span>
-              ) : (
-                <span className="whitespace-pre-wrap">{activeConversation?.summary || ' '}</span>
-              )}
-            </div>
-          </div>
-        </div>
-
         <div className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Raw units</h3>
           {visibleUnits.map(unitItem)}
