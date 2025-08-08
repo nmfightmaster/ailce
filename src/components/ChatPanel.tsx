@@ -3,6 +3,7 @@ import { useContextStore } from '../store/useContextStore'
 import type { ContextUnit, Conversation } from '../store/useContextStore'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Window } from './Window'
 
 function roleLabel(role: ContextUnit['type']) {
   if (role === 'user') return 'You'
@@ -13,10 +14,7 @@ function roleLabel(role: ContextUnit['type']) {
 export function ChatPanel() {
   const conversations = useContextStore((s) => s.conversations)
   const activeConversationId = useContextStore((s) => s.activeConversationId)
-  const setActiveConversation = useContextStore((s) => s.setActiveConversation)
-  const renameConversation = useContextStore((s) => s.renameConversation)
-  const createConversation = useContextStore((s) => s.createConversation)
-  const deleteConversation = useContextStore((s) => s.deleteConversation)
+  // Pull only what ChatPanel uses from the store
   const addUnit = useContextStore((s) => s.addUnit)
   const assembleMessagesFromStore = useContextStore((s) => s.assembleMessages)
   const regenerationRequest = useContextStore((s) => s.regenerationRequest)
@@ -26,6 +24,16 @@ export function ChatPanel() {
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement>(null)
   const [isRequestInFlight, setIsRequestInFlight] = useState(false)
+  // Ephemeral assistant typing state
+  const [isThinking, setIsThinking] = useState(false)
+  const [isTyping, setIsTyping] = useState(false)
+  const [typingTarget, setTypingTarget] = useState('')
+  const [typedText, setTypedText] = useState('')
+  const typingRafRef = useRef<number | null>(null)
+  const typingStartRef = useRef<number>(0)
+  const typingTokenRef = useRef<number>(0)
+  // Seed system message for blank conversations
+  const [systemDraft, setSystemDraft] = useState('')
 
   const activeConversation: Conversation | undefined = useMemo(
     () => conversations.find((c) => c.id === activeConversationId) || conversations[0],
@@ -33,6 +41,7 @@ export function ChatPanel() {
   )
 
   const units = activeConversation?.units || []
+  const hasSystemMessage = useMemo(() => units.some((u) => u.type === 'system' && !u.removed), [units])
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
@@ -76,9 +85,26 @@ export function ChatPanel() {
 
   const messagesPreview = useMemo(() => assembleMessages(units), [units])
 
+  const handleSetSystem = () => {
+    const trimmed = systemDraft.trim()
+    if (!trimmed) return
+    const systemUnit: ContextUnit = {
+      id: Math.random().toString(36).slice(2),
+      type: 'system',
+      content: trimmed,
+      tags: [],
+      pinned: true,
+      removed: false,
+      timestamp: new Date().toISOString(),
+    }
+    addUnit(systemUnit)
+    setSystemDraft('')
+  }
+
   const handleSend = async () => {
     const trimmed = input.trim()
     if (!trimmed) return
+    if (!hasSystemMessage) return // require system message first
     const userUnit: ContextUnit = {
       id: Math.random().toString(36).slice(2),
       type: 'user',
@@ -91,6 +117,10 @@ export function ChatPanel() {
     addUnit(userUnit)
     setInput('')
     setIsRequestInFlight(true)
+    // Show thinking indicator while awaiting API
+    setIsThinking(true)
+    // Reset typing states
+    cancelTyping(true)
 
     try {
       const currentConversationId = useContextStore.getState().activeConversationId || (useContextStore.getState().conversations[0]?.id ?? '')
@@ -118,26 +148,12 @@ export function ChatPanel() {
       }
       const data: any = await response.json()
       const aiText: string = data?.choices?.[0]?.message?.content ?? ''
-
-      addUnit({
-        id: Math.random().toString(36).slice(2),
-        type: 'assistant',
-        content: aiText || '[Error: failed to get response]',
-        tags: [],
-        pinned: false,
-        removed: false,
-        timestamp: new Date().toISOString(),
-      })
+      // Replace thinking bubble with typing animation
+      setIsThinking(false)
+      startTyping(aiText || '[Error: failed to get response]')
     } catch (err) {
-      addUnit({
-        id: Math.random().toString(36).slice(2),
-        type: 'assistant',
-        content: '[Error: failed to get response]',
-        tags: [],
-        pinned: false,
-        removed: false,
-        timestamp: new Date().toISOString(),
-      })
+      setIsThinking(false)
+      startTyping('[Error: failed to get response]')
     } finally {
       setIsRequestInFlight(false)
     }
@@ -171,6 +187,83 @@ export function ChatPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [regenerationRequest])
 
+  // Smooth typing animation using requestAnimationFrame
+  const startTyping = (target: string) => {
+    if (!target) return
+    cancelTyping(true)
+    setTypingTarget(target)
+    setTypedText('')
+    setIsTyping(true)
+    typingStartRef.current = performance.now()
+    const token = (typingTokenRef.current = (typingTokenRef.current || 0) + 1)
+
+    const charsPerSecond = 96 // natural pace
+    const step = (now: number) => {
+      if (token !== typingTokenRef.current) return // canceled/replaced
+      const elapsed = (now - typingStartRef.current) / 1000
+      const count = Math.min(target.length, Math.floor(elapsed * charsPerSecond))
+      setTypedText(target.slice(0, count))
+      if (count >= target.length) {
+        finishTyping(target)
+        return
+      }
+      typingRafRef.current = requestAnimationFrame(step)
+    }
+    typingRafRef.current = requestAnimationFrame(step)
+  }
+
+  const finishTyping = (finalText: string) => {
+    // Commit assistant message to store and clear ephemeral state
+    setIsTyping(false)
+    setTypingTarget('')
+    setTypedText('')
+    if (typingRafRef.current) cancelAnimationFrame(typingRafRef.current)
+    typingRafRef.current = null
+    addUnit({
+      id: Math.random().toString(36).slice(2),
+      type: 'assistant',
+      content: finalText,
+      tags: [],
+      pinned: false,
+      removed: false,
+      timestamp: new Date().toISOString(),
+    })
+  }
+
+  const cancelTyping = (discard = false) => {
+    typingTokenRef.current += 1
+    if (typingRafRef.current) cancelAnimationFrame(typingRafRef.current)
+    typingRafRef.current = null
+    setIsTyping(false)
+    setIsThinking(false)
+    if (!discard && typingTarget) {
+      // Commit what we have
+      finishTyping(typingTarget)
+    } else {
+      setTypingTarget('')
+      setTypedText('')
+    }
+  }
+
+  // Cancel ephemeral typing when switching conversations
+  useEffect(() => {
+    cancelTyping(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeConversation?.id])
+
+  // Cancel typing if a regeneration flow starts
+  useEffect(() => {
+    if (regenerationRequest) cancelTyping(true)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [regenerationRequest])
+
+  // Auto-scroll while typing
+  useEffect(() => {
+    if (isTyping) {
+      listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
+    }
+  }, [typedText, isTyping])
+
   const messageItem = (m: ContextUnit) => (
     <div key={m.id} className="flex gap-3">
       <div
@@ -194,66 +287,107 @@ export function ChatPanel() {
     </div>
   )
 
-  const [conversationTitleDraft, setConversationTitleDraft] = useState('')
-
-  const handleCreateConversation = () => {
-    const title = conversationTitleDraft.trim() || undefined
-    createConversation(title)
-    setConversationTitleDraft('')
-  }
+  // no-op
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-white/10 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">Live Context Editor</h1>
-            <p className="text-xs text-zinc-400">Chat on the left. Curate context on the right.</p>
-          </div>
+    <Window title="Live Context Editor" subtitle="Chat on the left. Curate context on the right.">
+      <div className="flex h-full flex-col">
+        <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">
+          {units
+            .filter((u) => !u.removed)
+            .filter((u) => u.type === 'user' || u.type === 'assistant')
+            .map(messageItem)}
+          {/* Thinking placeholder */}
+          {isThinking && (
+            <div className="flex gap-3">
+              <div className="shrink-0 select-none rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-500/15 text-emerald-300">
+                AI
+              </div>
+              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-zinc-300 shadow-soft animate-pulse">
+                thinking
+                <span className="inline-block w-1">.</span>
+                <span className="inline-block w-1">.</span>
+                <span className="inline-block w-1">.</span>
+              </div>
+            </div>
+          )}
+          {/* Typing bubble */}
+          {isTyping && (
+            <div className="flex gap-3">
+              <div className="shrink-0 select-none rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-500/15 text-emerald-300">
+                AI
+              </div>
+              <div className="prose prose-invert max-w-none prose-pre:mt-2 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-code:text-[0.9em] prose-code:before:hidden prose-code:after:hidden">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {typedText || ' '}
+                </ReactMarkdown>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t border-white/10 p-3">
+          {hasSystemMessage ? (
+            <div className="flex items-end gap-2">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    if (!isRequestInFlight) {
+                      void handleSend()
+                    }
+                  }
+                }}
+                placeholder="Type a message..."
+                rows={2}
+                className="min-h-10 w-full resize-y rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+              />
+              <button
+                onClick={handleSend}
+                disabled={isRequestInFlight}
+                className="h-10 shrink-0 rounded-lg bg-sky-500 px-4 text-sm font-medium text-white shadow-soft hover:bg-sky-400 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-sky-500/50"
+              >
+                {isRequestInFlight ? 'Sending…' : 'Send'}
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-xs text-zinc-400">Set a system message to start this conversation.</div>
+              <div className="flex items-end gap-2">
+                <textarea
+                  value={systemDraft}
+                  onChange={(e) => setSystemDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      handleSetSystem()
+                    }
+                  }}
+                  placeholder="e.g., You are a concise assistant..."
+                  rows={2}
+                  className="min-h-10 w-full resize-y rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+                />
+                <button
+                  onClick={handleSetSystem}
+                  className="h-10 shrink-0 rounded-lg bg-emerald-500 px-4 text-sm font-medium text-black shadow-soft hover:bg-emerald-400"
+                >
+                  Set System
+                </button>
+              </div>
+            </div>
+          )}
+          {import.meta.env.DEV && (
+            <details className="mt-3 rounded-lg border border-white/10 bg-zinc-900/70 p-3 text-xs text-zinc-300">
+              <summary className="cursor-pointer select-none text-zinc-200">View assembled API context</summary>
+              <pre className="mt-2 max-h-64 overflow-auto rounded bg-black/40 p-2 text-[11px] leading-snug text-zinc-200">
+                {JSON.stringify(messagesPreview, null, 2)}
+              </pre>
+            </details>
+          )}
         </div>
       </div>
-
-      <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">
-        {units
-          .filter((u) => !u.removed)
-          .filter((u) => u.type === 'user' || u.type === 'assistant')
-          .map(messageItem)}
-      </div>
-
-      <div className="border-t border-white/10 p-3">
-        <div className="flex items-end gap-2">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                if (!isRequestInFlight) {
-                  void handleSend()
-                }
-              }
-            }}
-            placeholder="Type a message..."
-            rows={2}
-            className="min-h-10 w-full resize-y rounded-lg border border-white/10 bg-white/5 p-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
-          />
-          <button
-            onClick={handleSend}
-            disabled={isRequestInFlight}
-            className="h-10 shrink-0 rounded-lg bg-sky-500 px-4 text-sm font-medium text-white shadow-soft hover:bg-sky-400 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-sky-500/50"
-          >
-            {isRequestInFlight ? 'Sending…' : 'Send'}
-          </button>
-        </div>
-        {import.meta.env.DEV && (
-          <details className="mt-3 rounded-lg border border-white/10 bg-zinc-900/70 p-3 text-xs text-zinc-300">
-            <summary className="cursor-pointer select-none text-zinc-200">View assembled API context</summary>
-            <pre className="mt-2 max-h-64 overflow-auto rounded bg-black/40 p-2 text-[11px] leading-snug text-zinc-200">
-              {JSON.stringify(messagesPreview, null, 2)}
-            </pre>
-          </details>
-        )}
-      </div>
-    </div>
+    </Window>
   )
 }

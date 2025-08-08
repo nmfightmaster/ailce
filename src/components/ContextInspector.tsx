@@ -1,7 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { useContextStore } from '../store/useContextStore'
 import type { ContextUnit, Conversation } from '../store/useContextStore'
 import { ContextUnitItem } from './ContextUnitItem'
+import { Window } from './Window'
 
 function Tag({ label }: { label: string }) {
   return (
@@ -26,7 +27,6 @@ function TypeBadge({ type }: { type: ContextUnit['type'] }) {
 export function ContextInspector() {
   const conversations = useContextStore((s) => s.conversations)
   const activeConversationId = useContextStore((s) => s.activeConversationId)
-  const [showRemoved, setShowRemoved] = useState(false)
 
   const activeConversation: Conversation | undefined = useMemo(
     () => conversations.find((c) => c.id === activeConversationId) || conversations[0],
@@ -34,30 +34,12 @@ export function ContextInspector() {
   )
   const units = activeConversation?.units || []
 
-  const visibleUnits = useMemo(
-    () => units.filter((u) => (showRemoved ? true : !u.removed)),
-    [units, showRemoved]
-  )
+  const visibleUnits = useMemo(() => units.filter((u) => !u.removed), [units])
 
   const unitItem = (u: ContextUnit) => <ContextUnitItem key={u.id} unit={u} />
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-white/10 px-4 py-3">
-        <h2 className="text-base font-semibold tracking-tight">Context Inspector</h2>
-        <div className="mt-2 flex items-center gap-2 text-xs text-zinc-400">
-          <label className="inline-flex cursor-pointer items-center gap-2">
-            <input
-              type="checkbox"
-              className="h-3 w-3 cursor-pointer accent-rose-500"
-              checked={showRemoved}
-              onChange={(e) => setShowRemoved(e.target.checked)}
-            />
-            Show removed
-          </label>
-        </div>
-      </div>
-
+    <Window title="Context Inspector">
       <div className="flex-1 overflow-y-auto p-3">
         <div className="mb-4 space-y-2">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Summary</h3>
@@ -76,6 +58,6 @@ export function ContextInspector() {
           )}
         </div>
       </div>
-    </div>
+    </Window>
   )
 }

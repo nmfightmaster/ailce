@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useContextStore } from '../store/useContextStore'
+import { Window } from './Window'
 
 export function ConversationManager() {
   const conversations = useContextStore((s) => s.conversations)
@@ -10,6 +11,7 @@ export function ConversationManager() {
   const deleteConversation = useContextStore((s) => s.deleteConversation)
 
   const [conversationTitleDraft, setConversationTitleDraft] = useState('')
+  const [systemPromptDraft, setSystemPromptDraft] = useState('')
 
   const activeConversation = useMemo(
     () => conversations.find((c) => c.id === activeConversationId) || conversations[0],
@@ -18,16 +20,28 @@ export function ConversationManager() {
 
   const handleCreateConversation = () => {
     const title = conversationTitleDraft.trim() || undefined
-    createConversation(title)
+    const systemText = systemPromptDraft.trim()
+    if (systemText) {
+      createConversation(title, [
+        {
+          id: Math.random().toString(36).slice(2),
+          type: 'system',
+          content: systemText,
+          tags: [],
+          pinned: true,
+          removed: false,
+          timestamp: new Date().toISOString(),
+        },
+      ])
+    } else {
+      createConversation(title)
+    }
     setConversationTitleDraft('')
+    setSystemPromptDraft('')
   }
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-white/10 px-4 py-3">
-        <h2 className="text-base font-semibold tracking-tight">Conversation Manager</h2>
-        <p className="text-xs text-zinc-400">Create, switch, rename, delete, or fork conversations.</p>
-      </div>
+    <Window title="Conversation Manager" subtitle="Create, switch, rename, delete, or fork conversations.">
       <div className="p-3">
         <div className="mb-2 flex items-center gap-2">
           <input
@@ -43,6 +57,18 @@ export function ConversationManager() {
           >
             New Conversation
           </button>
+        </div>
+        <div className="mb-3">
+          <label className="mb-1 block text-[11px] uppercase tracking-wide text-zinc-400">
+            system message
+          </label>
+          <textarea
+            value={systemPromptDraft}
+            onChange={(e) => setSystemPromptDraft(e.target.value)}
+            placeholder="e.g., You are a concise assistant..."
+            rows={2}
+            className="w-full max-w-[520px] resize-y rounded-md border border-white/10 bg-white/5 p-2 text-xs text-zinc-100 placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-sky-500/40"
+          />
         </div>
         <div className="flex items-center gap-2 overflow-x-auto">
           {conversations.map((c) => {
@@ -84,7 +110,7 @@ export function ConversationManager() {
           })}
         </div>
       </div>
-    </div>
+    </Window>
   )
 }
 

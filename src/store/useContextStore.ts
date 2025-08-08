@@ -82,26 +82,7 @@ interface ContextStoreState {
 const nowIso = () => new Date().toISOString()
 const randomId = () => Math.random().toString(36).slice(2)
 
-const createInitialUnits = (): ContextUnit[] => [
-  {
-    id: randomId(),
-    type: 'system',
-    content: 'AI persona: concise, helpful, and safe. Avoid using removed info.',
-    tags: ['policy', 'persona'],
-    pinned: true,
-    removed: false,
-    timestamp: nowIso(),
-  },
-  {
-    id: randomId(),
-    type: 'note',
-    content: 'User prefers minimalist, fun UI. Keep whitespace generous.',
-    tags: ['ux', 'style'],
-    pinned: false,
-    removed: false,
-    timestamp: nowIso(),
-  },
-]
+const createInitialUnits = (): ContextUnit[] => []
 
 const createInitialConversation = (): Conversation => ({
   id: randomId(),

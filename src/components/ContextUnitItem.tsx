@@ -38,18 +38,19 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
   }, [unit.content, isEditing])
 
   const MAX_PREVIEW_CHARS = 100
-  const { displayText, isTruncated } = useMemo(() => {
+  const { displayText, isOverflowing } = useMemo(() => {
     const text = unit.content
-    if (isEditing) return { displayText: text, isTruncated: false }
-    if (isExpanded) return { displayText: text, isTruncated: false }
-    if (text.length <= MAX_PREVIEW_CHARS) return { displayText: text, isTruncated: false }
-    // take first line or ~MAX_PREVIEW_CHARS
+    if (isEditing) return { displayText: text, isOverflowing: false }
+    // Determine if the raw text exceeds preview bounds (independent of expanded state)
     const firstLineBreak = text.indexOf('\n')
     const limit = Math.min(
       MAX_PREVIEW_CHARS,
       firstLineBreak === -1 ? MAX_PREVIEW_CHARS : Math.min(firstLineBreak, MAX_PREVIEW_CHARS)
     )
-    return { displayText: text.slice(0, limit) + '…', isTruncated: true }
+    const exceeds = text.length > MAX_PREVIEW_CHARS || (firstLineBreak !== -1 && firstLineBreak > MAX_PREVIEW_CHARS)
+    if (isExpanded) return { displayText: text, isOverflowing: exceeds }
+    if (!exceeds) return { displayText: text, isOverflowing: false }
+    return { displayText: text.slice(0, limit) + '…', isOverflowing: true }
   }, [unit.content, isExpanded, isEditing])
 
   const onSave = () => {
@@ -81,42 +82,40 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
             {new Date(unit.timestamp).toLocaleTimeString()}
           </span>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => {
-              setIsEditing(true)
-              setIsExpanded(true)
-            }}
-            className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.type === 'user' ? 'bg-white/10 text-zinc-300 hover:bg-white/20' : 'bg-white/5 text-zinc-500 cursor-not-allowed'}`}
-            title={unit.type === 'user' ? 'Edit' : 'Editing disabled for this message type'}
-            disabled={unit.type !== 'user'}
-          >
-            Edit
-          </button>
-          <button
-            onClick={() => unit.type === 'user' && togglePin(unit.id)}
-            className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.type !== 'user' ? 'bg-white/5 text-zinc-500 cursor-not-allowed' : unit.pinned ? 'bg-yellow-500 text-black' : 'bg-white/10 text-zinc-300 hover:bg-white/20'}`}
-            title={unit.type !== 'user' ? 'Pinning disabled for this message type' : (unit.pinned ? 'Unpin' : 'Pin')}
-            disabled={unit.type !== 'user'}
-          >
-            {unit.pinned ? 'Pinned' : 'Pin'}
-          </button>
-          <button
-            onClick={() => {
-              if (unit.type !== 'user') return
-              if (unit.removed) {
-                toggleRemoved(unit.id)
-              } else {
-                openRemoveModal(activeConversationId, unit.id)
-              }
-            }}
-            className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.type !== 'user' ? 'bg-white/5 text-zinc-500 cursor-not-allowed' : unit.removed ? 'bg-emerald-500 text-black' : 'bg-rose-500/80 text-white hover:bg-rose-500'}`}
-            title={unit.type !== 'user' ? 'Removal disabled for this message type' : (unit.removed ? 'Restore' : 'Remove from context')}
-            disabled={unit.type !== 'user'}
-          >
-            {unit.removed ? 'Restore' : 'Remove'}
-          </button>
-        </div>
+        {unit.type === 'user' && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => {
+                setIsEditing(true)
+                setIsExpanded(true)
+              }}
+              className="rounded-md px-2 py-1 text-xs transition-colors bg-white/10 text-zinc-300 hover:bg-white/20"
+              title={'Edit'}
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => togglePin(unit.id)}
+              className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.pinned ? 'bg-yellow-500 text-black' : 'bg-white/10 text-zinc-300 hover:bg-white/20'}`}
+              title={unit.pinned ? 'Unpin' : 'Pin'}
+            >
+              {unit.pinned ? 'Pinned' : 'Pin'}
+            </button>
+            <button
+              onClick={() => {
+                if (unit.removed) {
+                  toggleRemoved(unit.id)
+                } else {
+                  openRemoveModal(activeConversationId, unit.id)
+                }
+              }}
+              className={`rounded-md px-2 py-1 text-xs transition-colors ${unit.removed ? 'bg-emerald-500 text-black' : 'bg-rose-500/80 text-white hover:bg-rose-500'}`}
+              title={unit.removed ? 'Restore' : 'Remove from context'}
+            >
+              {unit.removed ? 'Restore' : 'Remove'}
+            </button>
+          </div>
+        )}
       </div>
       <div className="mb-2">
         {isEditing ? (
@@ -146,7 +145,7 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
         ) : (
           <div>
             <div className="whitespace-pre-wrap text-sm leading-relaxed text-zinc-100/90">{displayText}</div>
-            {isTruncated && (
+            {isOverflowing && (
               <button
                 className="mt-1 text-[11px] font-medium text-sky-300 hover:text-sky-200"
                 onClick={() => setIsExpanded((v) => !v)}
