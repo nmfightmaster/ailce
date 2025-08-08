@@ -16,8 +16,8 @@ export function Window({ title, subtitle, right, className = '', headerClassName
       <div className={`border-b border-white/10 px-4 py-3 ${headerClassName}`} style={{ background: 'var(--window-bg)' }}>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-semibold tracking-tight">{title}</h2>
-            {subtitle && <p className="text-xs text-zinc-400">{subtitle}</p>}
+            <h2 className="text-base font-semibold tracking-tight" style={{ color: 'var(--header-text, var(--window-text))' }}>{title}</h2>
+            {subtitle && <p className="text-xs" style={{ color: 'var(--secondary-text, #a1a1aa)' }}>{subtitle}</p>}
           </div>
           {right && <div className="shrink-0">{right}</div>}
         </div>

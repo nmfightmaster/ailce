@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import type { ContextUnit } from '../store/useContextStore'
 import { useContextStore } from '../store/useContextStore'
 import { useThemeStore } from '../store/useThemeStore'
+import { countTokensForText } from '../utils/tokenUtils'
 
 function Tag({ label }: { label: string }) {
   return (
@@ -33,6 +34,7 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
   const [isEditing, setIsEditing] = useState(false)
   const [draft, setDraft] = useState(unit.content)
   const [isExpanded, setIsExpanded] = useState(false)
+  const tokenCount = useMemo(() => countTokensForText(unit.content), [unit.content])
 
   // Keep local draft in sync if the backing unit changes externally
   useEffect(() => {
@@ -167,6 +169,11 @@ export function ContextUnitItem({ unit }: { unit: ContextUnit }) {
               >
                 {isExpanded ? 'Show less' : 'Show more'}
               </button>
+            )}
+            {(unit.type === 'user' || unit.type === 'assistant') && !unit.removed && (
+              <div className="mt-1 text-[10px]" style={{ color: 'var(--secondary-text)' }}>
+                {tokenCount} tokens
+              </div>
             )}
           </div>
         )}

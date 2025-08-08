@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm'
 import { Window } from './Window'
 import { useThemeStore } from '../store/useThemeStore'
 import type { ThemeState } from '../store/useThemeStore'
+import { countTokensForText } from '../utils/tokenUtils'
 
 function roleLabel(role: ContextUnit['type'], assistantName: string) {
   if (role === 'user') return 'You'
@@ -90,6 +91,21 @@ export function ChatPanel() {
   }
 
   const messagesPreview = useMemo(() => assembleMessages(units), [units])
+  // Recompute totals on render changes of units by calling store's recompute
+  const recomputeTokenTotals = useContextStore((s) => s.recomputeTokenTotals)
+  useEffect(() => {
+    if (activeConversation?.id) recomputeTokenTotals(activeConversation.id)
+  }, [units.length, activeConversation?.id, recomputeTokenTotals])
+
+  const tokenCountById = useMemo(() => {
+    const map = new Map<string, number>()
+    for (const u of units) {
+      if (u.removed) continue
+      if (u.type !== 'user' && u.type !== 'assistant') continue
+      map.set(u.id, countTokensForText(u.content))
+    }
+    return map
+  }, [units])
 
   const handleSetSystem = () => {
     const trimmed = systemDraft.trim()
@@ -350,10 +366,15 @@ export function ChatPanel() {
       >
         {roleLabel(m.type, assistantName)}
       </div>
-      <div className="prose prose-invert max-w-none prose-pre:mt-2 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-code:text-[0.9em] prose-code:before:hidden prose-code:after:hidden">
+      <div className="relative prose prose-invert max-w-none prose-pre:mt-2 prose-pre:bg-black/40 prose-pre:border prose-pre:border-white/10 prose-code:text-[0.9em] prose-code:before:hidden prose-code:after:hidden">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>
           {m.content}
         </ReactMarkdown>
+        {(m.type === 'user' || m.type === 'assistant') && (
+          <div className="absolute -bottom-4 right-0 text-[10px]" style={{ color: 'var(--secondary-text)' }}>
+            {tokenCountById.get(m.id) ?? 0} tokens
+          </div>
+        )}
       </div>
     </div>
   )
@@ -375,7 +396,7 @@ export function ChatPanel() {
       }
     >
       <div className="flex h-full flex-col">
-        <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div ref={listRef} className="flex-1 space-y-6 overflow-y-auto p-4">
           {units
             .filter((u) => !u.removed)
             .filter((u) => u.type === 'user' || u.type === 'assistant')

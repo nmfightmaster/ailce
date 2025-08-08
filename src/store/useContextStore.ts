@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { countTokensForText } from '../utils/tokenUtils'
 import { persist, createJSONStorage } from 'zustand/middleware'
 
 export type ContextUnitType = 'user' | 'assistant' | 'system' | 'note'
@@ -26,6 +27,10 @@ export interface Conversation {
   summaryLoading?: boolean
   summaryError?: string
   summaryCacheKey?: string
+  // Token totals for assembled context
+  totalTokens?: number
+  totalUserTokens?: number
+  totalAssistantTokens?: number
 }
 
 export type ChatMessageForApi = { role: 'system' | 'user' | 'assistant'; content: string }
@@ -61,6 +66,8 @@ interface ContextStoreState {
 
   // Advanced helpers
   assembleMessages: (conversationId: string, upToUnitId?: string) => ChatMessageForApi[]
+  // Token totals
+  recomputeTokenTotals: (conversationId: string, upToUnitId?: string) => void
   insertAssistantAfter: (conversationId: string, afterUnitId: string, content: string) => void
   // Variant that returns the new assistant id for streaming updates
   insertAssistantAfterGetId: (conversationId: string, afterUnitId: string, content: string) => string
@@ -100,7 +107,7 @@ const createInitialUnits = (): ContextUnit[] => []
 
 const createInitialConversation = (): Conversation => ({
   id: randomId(),
-  title: 'Welcome',
+  title: 'New Conversation',
   createdAt: nowIso(),
   units: createInitialUnits(),
   summary: '',
@@ -114,6 +121,75 @@ const findConversationIndex = (state: ContextStoreState, conversationId: string)
   state.conversations.findIndex((c) => c.id === conversationId)
 
 const initialConversation = createInitialConversation()
+
+// Build assembled messages and compute token totals using OpenAI-compatible tokenization
+function internalAssembleWithTotals(
+  units: ContextUnit[],
+  upToUnitId?: string
+): {
+  messages: ChatMessageForApi[]
+  totals: { totalTokens: number; totalUserTokens: number; totalAssistantTokens: number }
+} {
+  const sorted = [...units].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  )
+
+  const slice = (() => {
+    if (!upToUnitId) return sorted
+    const idx = sorted.findIndex((u) => u.id === upToUnitId)
+    return idx === -1 ? sorted : sorted.slice(0, idx + 1)
+  })()
+
+  if (slice.length === 0) {
+    return {
+      messages: [],
+      totals: { totalTokens: 0, totalUserTokens: 0, totalAssistantTokens: 0 },
+    }
+  }
+
+  const lastUser = [...slice]
+    .filter((u) => u.type === 'user')
+    .reduce<ContextUnit | null>((acc, cur) => {
+      if (!acc) return cur
+      return new Date(cur.timestamp).getTime() >= new Date(acc.timestamp).getTime() ? cur : acc
+    }, null)
+
+  const lastUserTime = lastUser ? new Date(lastUser.timestamp).getTime() : null
+
+  const removedBeforeLastUser = lastUser
+    ? slice.filter((u) => u.removed && new Date(u.timestamp).getTime() < (lastUserTime as number))
+    : []
+
+  const forgetMessages: ChatMessageForApi[] = removedBeforeLastUser.map((u) => ({
+    role: 'system',
+    content: `Note: Forget any earlier mention of '${u.content}'. It is incorrect or irrelevant.`,
+  }))
+
+  const nonRemoved = slice.filter((u) => !u.removed)
+  const mainMessages: ChatMessageForApi[] = nonRemoved.map((u) => ({
+    role: u.type === 'note' ? 'system' : (u.type as 'system' | 'user' | 'assistant'),
+    content: u.content,
+  }))
+
+  const messages = [...forgetMessages, ...mainMessages]
+
+  // Totals by role
+  let totalUserTokens = 0
+  let totalAssistantTokens = 0
+  let totalTokens = 0
+  for (const m of messages) {
+    const n = countTokensForText(m.content)
+    if (m.role === 'user') {
+      totalUserTokens += n
+      totalTokens += n
+    } else if (m.role === 'assistant') {
+      totalAssistantTokens += n
+      totalTokens += n
+    }
+  }
+
+  return { messages, totals: { totalTokens, totalUserTokens, totalAssistantTokens } }
+}
 
 // Attempt to read legacy data written by earlier, custom persistence
 function readLegacyPersisted(): { activeConversationId: string; conversations: Conversation[] } | null {
@@ -129,7 +205,7 @@ function readLegacyPersisted(): { activeConversationId: string; conversations: C
     if (!data || !Array.isArray(data.conversations)) return null
     const conversations: Conversation[] = data.conversations.map((c) => ({
       id: c.id || Math.random().toString(36).slice(2),
-      title: c.title || 'Conversation',
+      title: c.title || 'New Conversation',
       createdAt: c.createdAt || new Date().toISOString(),
       parentConversationId: c.parentConversationId,
       forkedFromUnitId: c.forkedFromUnitId,
@@ -176,7 +252,7 @@ export const useContextStore = create<ContextStoreState>()(
   createConversation: (title, baseUnits, meta) => {
     const newConv: Conversation = {
       id: randomId(),
-      title: title?.trim() || `Conversation ${get().conversations.length + 1}`,
+      title: title?.trim() || 'New Conversation',
       createdAt: nowIso(),
       parentConversationId: meta?.parentConversationId,
       forkedFromUnitId: meta?.forkedFromUnitId,
@@ -200,11 +276,20 @@ export const useContextStore = create<ContextStoreState>()(
   deleteConversation: (conversationId) => {
     set((state) => {
       const remaining = state.conversations.filter((c) => c.id !== conversationId)
+      if (remaining.length === 0) {
+        const newConv = createInitialConversation()
+        // schedule summary and tokens recompute after state commit
+        queueMicrotask(() => {
+          useContextStore.getState().requestSummaryRefresh(newConv.id, true)
+          useContextStore.getState().recomputeTokenTotals(newConv.id)
+        })
+        return { conversations: [newConv], activeConversationId: newConv.id }
+      }
       const nextActive =
         state.activeConversationId === conversationId
           ? remaining[0]?.id || ''
           : state.activeConversationId
-      return { conversations: remaining.length ? remaining : state.conversations, activeConversationId: nextActive }
+      return { conversations: remaining, activeConversationId: nextActive }
     })
   },
   renameConversation: (conversationId, nextTitle) => {
@@ -216,6 +301,7 @@ export const useContextStore = create<ContextStoreState>()(
     set(() => ({ activeConversationId: conversationId }))
     // Ensure summary exists for the newly active conversation
     queueMicrotask(() => get().requestSummaryRefresh(conversationId))
+    queueMicrotask(() => get().recomputeTokenTotals(conversationId))
   },
 
   addUnit: (unit) =>
@@ -226,6 +312,7 @@ export const useContextStore = create<ContextStoreState>()(
       conversations[idx] = { ...conversations[idx], units: [...conversations[idx].units, unit] }
       // Trigger summary regeneration (debounced)
       queueMicrotask(() => get().requestSummaryRefresh(conversations[idx].id))
+      queueMicrotask(() => get().recomputeTokenTotals(conversations[idx].id))
       return { conversations }
     }),
   togglePin: (id) =>
@@ -236,6 +323,7 @@ export const useContextStore = create<ContextStoreState>()(
       const conversations = [...state.conversations]
       conversations[idx] = { ...conversations[idx], units }
       queueMicrotask(() => get().requestSummaryRefresh(conversations[idx].id))
+      queueMicrotask(() => get().recomputeTokenTotals(conversations[idx].id))
       return { conversations }
     }),
   toggleRemoved: (id) =>
@@ -248,6 +336,7 @@ export const useContextStore = create<ContextStoreState>()(
       const conversations = [...state.conversations]
       conversations[idx] = { ...conversations[idx], units }
       queueMicrotask(() => get().requestSummaryRefresh(conversations[idx].id))
+      queueMicrotask(() => get().recomputeTokenTotals(conversations[idx].id))
       return { conversations }
     }),
   updateUnit: (id, newContent) =>
@@ -258,6 +347,7 @@ export const useContextStore = create<ContextStoreState>()(
       const conversations = [...state.conversations]
       conversations[idx] = { ...conversations[idx], units }
       queueMicrotask(() => get().requestSummaryRefresh(conversations[idx].id))
+      queueMicrotask(() => get().recomputeTokenTotals(conversations[idx].id))
       return { conversations }
     }),
 
@@ -265,43 +355,39 @@ export const useContextStore = create<ContextStoreState>()(
     const state = get()
     const conv = state.conversations.find((c) => c.id === conversationId)
     if (!conv) return []
-    const sorted = [...conv.units].sort(
-      (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    )
-
-    const slice = (() => {
-      if (!upToUnitId) return sorted
-      const idx = sorted.findIndex((u) => u.id === upToUnitId)
-      return idx === -1 ? sorted : sorted.slice(0, idx + 1)
-    })()
-
-    if (slice.length === 0) return []
-
-    const lastUser = [...slice]
-      .filter((u) => u.type === 'user')
-      .reduce<ContextUnit | null>((acc, cur) => {
-        if (!acc) return cur
-        return new Date(cur.timestamp).getTime() >= new Date(acc.timestamp).getTime() ? cur : acc
-      }, null)
-
-    const lastUserTime = lastUser ? new Date(lastUser.timestamp).getTime() : null
-
-    const removedBeforeLastUser = lastUser
-      ? slice.filter((u) => u.removed && new Date(u.timestamp).getTime() < (lastUserTime as number))
-      : []
-
-    const forgetMessages = removedBeforeLastUser.map((u) => ({
-      role: 'system' as const,
-      content: `Note: Forget any earlier mention of '${u.content}'. It is incorrect or irrelevant.`,
-    }))
-
-    const nonRemoved = slice.filter((u) => !u.removed)
-    const mainMessages: ChatMessageForApi[] = nonRemoved.map((u) => ({
-      role: u.type === 'note' ? 'system' : (u.type as 'system' | 'user' | 'assistant'),
-      content: u.content,
-    }))
-
-    return [...forgetMessages, ...mainMessages]
+    const { messages, totals } = internalAssembleWithTotals(conv.units, upToUnitId)
+    // persist totals for UI
+    set((s) => {
+      const idx = findConversationIndex(s as any, conversationId)
+      if (idx === -1) return {}
+      const conversations = [...s.conversations]
+      conversations[idx] = {
+        ...conversations[idx],
+        totalTokens: totals.totalTokens,
+        totalUserTokens: totals.totalUserTokens,
+        totalAssistantTokens: totals.totalAssistantTokens,
+      }
+      return { conversations }
+    })
+    return messages
+  },
+  recomputeTokenTotals: (conversationId, upToUnitId) => {
+    const state = get()
+    const conv = state.conversations.find((c) => c.id === conversationId)
+    if (!conv) return
+    const { totals } = internalAssembleWithTotals(conv.units, upToUnitId)
+    set((s) => {
+      const idx = findConversationIndex(s as any, conversationId)
+      if (idx === -1) return {}
+      const conversations = [...s.conversations]
+      conversations[idx] = {
+        ...conversations[idx],
+        totalTokens: totals.totalTokens,
+        totalUserTokens: totals.totalUserTokens,
+        totalAssistantTokens: totals.totalAssistantTokens,
+      }
+      return { conversations }
+    })
   },
   insertAssistantAfter: (conversationId, afterUnitId, content) => {
     set((state) => {
@@ -323,6 +409,7 @@ export const useContextStore = create<ContextStoreState>()(
       const conversations = [...state.conversations]
       conversations[idx] = { ...conv, units: nextUnits }
       queueMicrotask(() => get().requestSummaryRefresh(conversationId))
+      queueMicrotask(() => get().recomputeTokenTotals(conversationId))
       return { conversations }
     })
   },
@@ -366,6 +453,7 @@ export const useContextStore = create<ContextStoreState>()(
     if (!options?.suppressSummaryRefresh) {
       queueMicrotask(() => get().requestSummaryRefresh(conversationId))
     }
+    queueMicrotask(() => get().recomputeTokenTotals(conversationId))
   },
   trimAfter: (conversationId, unitId) => {
     set((state) => {
@@ -377,6 +465,7 @@ export const useContextStore = create<ContextStoreState>()(
       const conversations = [...state.conversations]
       conversations[idx] = { ...conv, units: conv.units.slice(0, cutIndex + 1) }
       queueMicrotask(() => get().requestSummaryRefresh(conversationId))
+      queueMicrotask(() => get().recomputeTokenTotals(conversationId))
       return { conversations }
     })
   },
@@ -418,6 +507,7 @@ export const useContextStore = create<ContextStoreState>()(
       const conversations = [...s.conversations]
       conversations[idx] = { ...conv, units }
       queueMicrotask(() => get().requestSummaryRefresh(modal.conversationId))
+      queueMicrotask(() => get().recomputeTokenTotals(modal.conversationId))
       return { conversations, editModal: null }
     })
   },
@@ -446,6 +536,7 @@ export const useContextStore = create<ContextStoreState>()(
       }
     })
     queueMicrotask(() => get().requestSummaryRefresh(modal.conversationId))
+    queueMicrotask(() => get().recomputeTokenTotals(modal.conversationId))
   },
   applyEditBranch: (title) => {
     const state = get()
@@ -473,6 +564,8 @@ export const useContextStore = create<ContextStoreState>()(
       },
     }))
     queueMicrotask(() => get().requestSummaryRefresh(newConversationId))
+    queueMicrotask(() => get().recomputeTokenTotals(modal.conversationId))
+    queueMicrotask(() => get().recomputeTokenTotals(newConversationId))
   },
   applyRemoveDoNothing: () => {
     const state = get()
@@ -487,6 +580,7 @@ export const useContextStore = create<ContextStoreState>()(
       const conversations = [...s.conversations]
       conversations[idx] = { ...conv, units }
       queueMicrotask(() => get().requestSummaryRefresh(modal.conversationId))
+      queueMicrotask(() => get().recomputeTokenTotals(modal.conversationId))
       return { conversations, removeModal: null }
     })
   },
@@ -510,6 +604,7 @@ export const useContextStore = create<ContextStoreState>()(
       }
     })
     queueMicrotask(() => get().requestSummaryRefresh(modal.conversationId))
+    queueMicrotask(() => get().recomputeTokenTotals(modal.conversationId))
   },
   applyRemoveBranch: (title) => {
     const state = get()
@@ -531,6 +626,8 @@ export const useContextStore = create<ContextStoreState>()(
       activeConversationId: newConversationId,
     }))
     queueMicrotask(() => get().requestSummaryRefresh(newConversationId))
+    queueMicrotask(() => get().recomputeTokenTotals(modal.conversationId))
+    queueMicrotask(() => get().recomputeTokenTotals(newConversationId))
   },
   
   // Summary generation API
@@ -565,7 +662,7 @@ export const useContextStore = create<ContextStoreState>()(
         const rawConversations = Array.isArray(base.conversations) ? base.conversations : []
         const conversations: Conversation[] = rawConversations.map((c: any) => ({
           id: c?.id || Math.random().toString(36).slice(2),
-          title: c?.title || 'Conversation',
+          title: c?.title || 'New Conversation',
           createdAt: c?.createdAt || new Date().toISOString(),
           parentConversationId: c?.parentConversationId,
           forkedFromUnitId: c?.forkedFromUnitId,

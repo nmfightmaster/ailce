@@ -22,4 +22,10 @@ body { overflow: hidden; }
   --removed-dim: rgb(244 63 94 / 0.5);
   --window-bg: rgba(255,255,255,0.05);
   --window-text: rgba(244,244,245,0.9);
+  --header-text: rgba(244,244,245,0.95);
+  --secondary-text: rgb(161 161 170);
+  --user-token-color: rgb(125 211 252);
+  --assistant-token-color: rgb(167 243 208);
+  --token-bar-bg: rgba(255,255,255,0.08);
+  --remaining-token-color: rgba(255,255,255,0.18);
 }

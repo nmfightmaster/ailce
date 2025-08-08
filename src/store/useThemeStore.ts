@@ -10,6 +10,13 @@ export interface ThemeState {
   removedDim: string
   windowBg: string
   windowText: string
+  // New theme colors
+  headerText: string
+  secondaryText: string
+  userTokenColor: string
+  assistantTokenColor: string
+  tokenBarBg: string
+  remainingTokenColor: string
 
   assistantName: string
 
@@ -30,6 +37,12 @@ const DEFAULTS = {
   removedDim: 'rgb(244 63 94 / 0.5)', // rose-500/50
   windowBg: 'rgba(255,255,255,0.05)',
   windowText: 'rgba(244,244,245,0.9)',
+  headerText: 'rgba(244,244,245,0.95)',
+  secondaryText: 'rgb(161 161 170)', // zinc-400
+  userTokenColor: 'rgb(125 211 252)', // sky-300
+  assistantTokenColor: 'rgb(167 243 208)', // emerald-300
+  tokenBarBg: 'rgba(255,255,255,0.08)',
+  remainingTokenColor: 'rgba(255,255,255,0.18)',
   assistantName: 'AI',
 }
 
@@ -64,6 +77,12 @@ function writeCssVariables(state: Partial<ThemeState>) {
     ['--removed-dim', state.removedDim],
     ['--window-bg', state.windowBg],
     ['--window-text', state.windowText],
+    ['--header-text', state.headerText],
+    ['--secondary-text', state.secondaryText],
+    ['--user-token-color', state.userTokenColor],
+    ['--assistant-token-color', state.assistantTokenColor],
+    ['--token-bar-bg', state.tokenBarBg],
+    ['--remaining-token-color', state.remainingTokenColor],
   ]
   for (const [key, value] of entries) {
     if (typeof value === 'string' && value.length) {
@@ -98,6 +117,12 @@ export const useThemeStore = create<ThemeState>((set, get) => {
         removedDim: next.removedDim,
         windowBg: next.windowBg,
         windowText: next.windowText,
+        headerText: next.headerText,
+        secondaryText: next.secondaryText,
+        userTokenColor: next.userTokenColor,
+        assistantTokenColor: next.assistantTokenColor,
+        tokenBarBg: next.tokenBarBg,
+        remainingTokenColor: next.remainingTokenColor,
         assistantName: next.assistantName,
       })
       writeCssVariables(next)

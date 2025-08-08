@@ -15,6 +15,12 @@ export function ThemeSettings() {
     removedDim,
     windowBg,
     windowText,
+    headerText,
+    secondaryText,
+    userTokenColor,
+    assistantTokenColor,
+    tokenBarBg,
+    remainingTokenColor,
     assistantName,
   } = useThemeStore()
 
@@ -27,6 +33,12 @@ export function ThemeSettings() {
     removedDim,
     windowBg,
     windowText,
+    headerText,
+    secondaryText,
+    userTokenColor,
+    assistantTokenColor,
+    tokenBarBg,
+    remainingTokenColor,
     assistantName,
   })
 
@@ -128,6 +140,12 @@ export function ThemeSettings() {
       removedDim,
       windowBg,
       windowText,
+      headerText,
+      secondaryText,
+      userTokenColor,
+      assistantTokenColor,
+      tokenBarBg,
+      remainingTokenColor,
       assistantName,
     })
   }, [isSettingsOpen])
@@ -253,6 +271,13 @@ export function ThemeSettings() {
               <ColorControl label="Window bg" value={draft.windowBg} onChange={(v) => setDraft({ ...draft, windowBg: v })} />
               <ColorControl label="Window text" value={draft.windowText} onChange={(v) => setDraft({ ...draft, windowText: v })} />
               {warnWindow && <div className="col-span-2 text-[11px] text-amber-300">Low contrast for Window text (ratio {windowContrast?.toFixed(2)}). Aim for ≥ 4.5:1.</div>}
+
+              <ColorControl label="Header text" value={draft.headerText} onChange={(v) => setDraft({ ...draft, headerText: v })} />
+              <ColorControl label="Secondary text" value={draft.secondaryText} onChange={(v) => setDraft({ ...draft, secondaryText: v })} />
+              <ColorControl label="User token color" value={draft.userTokenColor} onChange={(v) => setDraft({ ...draft, userTokenColor: v })} />
+              <ColorControl label="Assistant token color" value={draft.assistantTokenColor} onChange={(v) => setDraft({ ...draft, assistantTokenColor: v })} />
+              <ColorControl label="Token bar background" value={draft.tokenBarBg} onChange={(v) => setDraft({ ...draft, tokenBarBg: v })} />
+              <ColorControl label="Remaining token color" value={draft.remainingTokenColor} onChange={(v) => setDraft({ ...draft, remainingTokenColor: v })} />
             </div>
 
             <h4 className="mt-4 text-xs font-semibold uppercase tracking-wide text-zinc-400">Assistant name</h4>
