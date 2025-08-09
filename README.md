@@ -1,69 +1,115 @@
-# React + TypeScript + Vite
+### Live Context Editor (React + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+An in-browser chat and context-curation tool for working with LLMs. Chat on the left, curate/trim/branch conversation context on the right, with live token counts, summaries, model selection, and a modern UI.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Features
+- **Chat + Context curation**: Send messages and curate the exact context the model sees (pin, trim, branch, remove).
+- **Model selector**: Choose from preset models or add custom ones with pricing and context window info.
+- **Streaming responses**: Live token streaming from the OpenAI Chat Completions API.
+- **Auto summaries**: Generates short summaries of the conversation.
+- **Token counting**: Client-side token estimates using `@dqbd/tiktoken` (WASM) for OpenAI-compatible models.
+- **Local-first state**: Conversations and settings persist in `localStorage`.
+- **Theme & layout**: Adjustable panes, theme settings, and responsive UI built with Tailwind CSS.
 
-## Expanding the ESLint configuration
+## Tech stack
+- React 19, TypeScript, Vite 7
+- Tailwind CSS 4
+- Zustand for state management and persistence
+- React Markdown + GFM for message rendering
+- `@dqbd/tiktoken` (WASM) for token counting
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Quick start
 
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Prerequisites
+- Node.js 18+ and npm 9+ (recommended)
+- An OpenAI API key
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Install
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Configure environment
+Create a `.env.local` file in the project root:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+# Required for calling OpenAI directly from the browser (development only)
+VITE_OPENAI_API_KEY=sk-...
 ```
+
+Notes:
+- Vite exposes only variables prefixed with `VITE_` to client code.
+- This app reads `VITE_OPENAI_API_KEY` at runtime. In dev, it will error if missing.
+
+### Run the app
+```bash
+npm run dev
+```
+Open the printed local URL (usually `http://localhost:5173`).
+
+### Build and preview
+```bash
+npm run build
+npm run preview
+```
+
+### Lint
+```bash
+npm run lint
+```
+
+## Usage
+1. **Set a system message**: Before sending your first message, add a system instruction (e.g., “You are a concise assistant…”). The UI requires a system message to start.
+2. **Chat**: Type a message and press Enter (or click Send). Responses stream in.
+3. **Curate context**:
+   - Trim or branch a conversation from any point.
+   - Mark units as removed to exclude them while preserving history.
+   - View live token counts per message and totals.
+4. **Switch models**: Use the model selector to change models or add your own with context window and pricing metadata.
+5. **Summaries**: A short summary is generated and refreshed as the conversation evolves.
+6. Dev-only: Toggle “View assembled API context” to see exactly what the API receives.
+
+## Environment variables
+- **`VITE_OPENAI_API_KEY` (required in dev)**: Your OpenAI key used for direct browser calls to the Chat Completions API.
+
+Security note:
+- This project calls OpenAI directly from the browser for convenience. Do not ship a production build that exposes your API key to end users. For production, proxy requests through your own backend and store secrets on the server. See: [OpenAI API keys](https://platform.openai.com/api-keys).
+
+## Scripts
+- `npm run dev`: Start Vite dev server
+- `npm run build`: Type-check and build for production
+- `npm run preview`: Preview the production build locally
+- `npm run lint`: Run ESLint
+
+## Data persistence
+- Conversations and settings persist in `localStorage` under keys like `live-context-conversations` and `live-context-settings`.
+- Layout preferences persist under `lce:leftWidth` and `lce:topHeight`.
+- To reset the app: clear your browser’s site data for this origin.
+
+## Deployment
+This is a static Vite app and can be hosted on any static host (e.g., Vercel, Netlify, GitHub Pages). For production:
+- Do not include `VITE_OPENAI_API_KEY` in client builds.
+- Provide a server-side proxy endpoint that accepts messages and calls OpenAI using server-held credentials.
+- Point the frontend to your proxy URL instead of `https://api.openai.com/v1/chat/completions`.
+
+## Project structure (high level)
+```
+src/
+  components/        UI components (chat panel, selectors, windows)
+  store/             Zustand stores for conversations and settings
+  data/              Static model info
+  utils/             Token utilities (tiktoken)
+  App.tsx            Layout and split panes
+```
+
+## Troubleshooting
+- Error “Missing VITE_OPENAI_API_KEY”: Add your key to `.env.local` and restart `npm run dev`.
+- 401/403 from OpenAI: Check your API key and account permissions.
+- 429 rate limit: Reduce request frequency or upgrade your OpenAI plan.
+- Streaming stalls: Network or CORS issues can interrupt streams; try again or use a server proxy.
+
+## License
+Add your preferred license here.
+
