@@ -1,6 +1,6 @@
 ### Live Context Editor (React + Vite)
 
-An in-browser chat and context-curation tool for working with LLMs. Chat on the left, curate/trim/branch conversation context on the right, with live token counts, summaries, model selection, and a modern UI.
+Live Context Editor is a collaborative AI conversation manager that gives teams complete control over what an LLM sees — pin key messages, trim irrelevant parts, branch scenarios, and see token counts in real time. Designed for accuracy, cost control, and repeatable results.
 
 ---
 
