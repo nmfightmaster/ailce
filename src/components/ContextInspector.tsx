@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useContextStore } from '../store/useContextStore'
 import type { ContextUnit, Conversation } from '../store/useContextStore'
 import { ContextUnitItem } from './ContextUnitItem'
@@ -8,6 +8,10 @@ export function ContextInspector() {
   const conversations = useContextStore((s) => s.conversations)
   const activeConversationId = useContextStore((s) => s.activeConversationId)
   const requestSummaryRefresh = useContextStore((s) => s.requestSummaryRefresh)
+
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+  const prevConversationIdRef = useRef<string | undefined>(undefined)
+  const prevUnitsCountRef = useRef<number | undefined>(undefined)
 
   const activeConversation: Conversation | undefined = useMemo(
     () => conversations.find((c) => c.id === activeConversationId) || conversations[0],
@@ -31,6 +35,27 @@ export function ContextInspector() {
       requestSummaryRefresh(activeConversation.id)
     }
   }, [activeConversation?.id])
+
+  // Auto-scroll to bottom when items load or when new items are added
+  useEffect(() => {
+    const container = scrollContainerRef.current
+    if (!container) return
+
+    const isConversationChanged = prevConversationIdRef.current !== activeConversation?.id
+    const previousCount = prevUnitsCountRef.current ?? 0
+    const hasMoreItems = visibleUnits.length > previousCount
+
+    if (isConversationChanged) {
+      // Instant jump on initial render or when switching conversations
+      container.scrollTop = container.scrollHeight
+    } else if (hasMoreItems) {
+      // Smooth scroll when appending new items in the same conversation
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
+    }
+
+    prevConversationIdRef.current = activeConversation?.id
+    prevUnitsCountRef.current = visibleUnits.length
+  }, [visibleUnits.length, activeConversation?.id])
 
   const cap = 128_000
   const used = totals.total
@@ -69,7 +94,7 @@ export function ContextInspector() {
         </div>
       }
     >
-      <div className="flex-1 min-h-0 overflow-y-auto p-3">
+      <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto p-3">
         <div className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Raw units</h3>
           {visibleUnits.map(unitItem)}
