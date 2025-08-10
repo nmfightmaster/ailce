@@ -4,6 +4,7 @@ import { ContextInspector } from './components/ContextInspector'
 import { EditSaveModal } from './components/EditSaveModal'
 import { ConversationManager } from './components/ConversationManager'
 import { SummaryWindow } from './components/SummaryWindow'
+import { SnapshotsWindow } from './components/SnapshotsWindow'
 import { ThemeSettings } from './components/ThemeSettings'
 import { AttachmentLibrary } from './components/AttachmentLibrary'
 
@@ -92,8 +93,9 @@ function App() {
       {/* Right: Conversation window (top) + Context window (bottom) */}
       <div ref={rightRef} className="min-h-0 flex flex-col">
         <div style={{ height: topHeight }} className="min-h-[120px] overflow-hidden">
-          <div className="grid grid-cols-2 gap-3 h-full p-3">
+          <div className="grid grid-cols-3 gap-3 h-full p-3">
             <ConversationManager />
+            <SnapshotsWindow />
             <AttachmentLibrary />
           </div>
         </div>

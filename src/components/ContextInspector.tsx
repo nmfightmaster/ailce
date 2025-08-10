@@ -3,6 +3,8 @@ import { useContextStore } from '../store/useContextStore'
 import type { ContextUnit, Conversation } from '../store/useContextStore'
 import { ContextUnitItem } from './ContextUnitItem'
 import { Window } from './Window'
+import { HelpTooltip } from './HelpTooltip'
+import { InfoBanner } from './InfoBanner'
 
 export function ContextInspector() {
   const conversations = useContextStore((s) => s.conversations)
@@ -66,35 +68,42 @@ export function ContextInspector() {
   return (
     <Window
       title="Context Inspector"
+      subtitle="Curate and snapshot the working context"
       bodyClassName="flex flex-col"
       headerClassName=""
       right={
-        <div className="w-56" title={`User: ${totals.user} tokens, Assistant: ${totals.assistant} tokens`}>
-          <div className="text-xs mb-1" style={{ color: 'var(--header-text)' }}>
-            {`Context Tokens: ${totals.total} / 128k`}
-          </div>
-          <div
-            className="h-2 w-full overflow-hidden rounded-full flex"
-            style={{ background: 'var(--token-bar-bg)' }}
-            aria-label="Token breakdown"
-          >
+        <div className="flex items-center gap-3">
+          <HelpTooltip title={'Snapshots are lightweight restore points inside this conversation. Use them before risky edits. Branching creates a new conversation.'} />
+          <div className="w-56" title={`User: ${totals.user} tokens, Assistant: ${totals.assistant} tokens`}>
+            <div className="text-xs mb-1" style={{ color: 'var(--header-text)' }}>
+              {`Context Tokens: ${totals.total} / 128k`}
+            </div>
             <div
-              className="h-full transition-[width] duration-300 ease-out"
-              style={{ width: `${userPct}%`, background: 'var(--user-token-color)' }}
-            />
-            <div
-              className="h-full transition-[width] duration-300 ease-out"
-              style={{ width: `${assistantPct}%`, background: 'var(--assistant-token-color)' }}
-            />
-            <div
-              className="h-full transition-[width] duration-300 ease-out"
-              style={{ width: `${remainingPct}%`, background: 'var(--remaining-token-color)' }}
-            />
+              className="h-2 w-full overflow-hidden rounded-full flex"
+              style={{ background: 'var(--token-bar-bg)' }}
+              aria-label="Token breakdown"
+            >
+              <div
+                className="h-full transition-[width] duration-300 ease-out"
+                style={{ width: `${userPct}%`, background: 'var(--user-token-color)' }}
+              />
+              <div
+                className="h-full transition-[width] duration-300 ease-out"
+                style={{ width: `${assistantPct}%`, background: 'var(--assistant-token-color)' }}
+              />
+              <div
+                className="h-full transition-[width] duration-300 ease-out"
+                style={{ width: `${remainingPct}%`, background: 'var(--remaining-token-color)' }}
+              />
+            </div>
           </div>
         </div>
       }
     >
       <div ref={scrollContainerRef} className="flex-1 min-h-0 overflow-y-auto p-3">
+        <InfoBanner className="mb-3">
+          <span className="text-[12px]">Tip: Create a snapshot before large edits. Restore rolls back here; Branch creates a separate conversation from a snapshot.</span>
+        </InfoBanner>
         <div className="space-y-3">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-400">Raw units</h3>
           {visibleUnits.map(unitItem)}

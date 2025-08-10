@@ -73,9 +73,10 @@ export function EditSaveModal() {
               <div className="font-medium">Branch Conversation</div>
               <div className="text-xs text-zinc-400">
               {isEditOpen
-                ? 'Save the edit, create a new conversation fork up to this point, and regenerate the assistant reply there.'
-                : 'Remove the message and create a new conversation fork up to this point.'}
+                ? 'Branches are independent conversation forks. Use a branch to explore alternatives without affecting this conversation.'
+                : 'Branches are independent conversation forks. Use a branch to explore alternatives without affecting this conversation.'}
               </div>
+              <div className="mt-1 text-[11px] text-zinc-500">Tip: Prefer a snapshot for quick rollback within this conversation.</div>
             </div>
             <input
               value={branchTitle}

@@ -13,6 +13,15 @@ Live Context Editor is a collaborative AI conversation manager that gives teams 
 - **Local-first state**: Conversations and settings persist in `localStorage`.
 - **Theme & layout**: Adjustable panes, theme settings, and responsive UI built with Tailwind CSS.
 
+## Branches vs Snapshots
+
+- **Branches (Conversations)**: Independent conversation forks. Use a branch to explore alternatives without affecting the original. Branching creates a new conversation entry in the Conversation Manager.
+- **Snapshots (Checkpoints)**: Lightweight restore points inside the current conversation. Create a snapshot before risky edits, then restore to roll back. Restoring does not create a new conversation. You can also branch from a snapshot to fork at a known-good state.
+
+Where to find them:
+- Branches are managed in `Conversation Manager` (top-right). Forks are labeled with a "Branch" badge.
+- Snapshots are managed in the `Snapshots` panel (next to Conversation Manager). Create, restore, or branch from snapshots there.
+
 ## Tech stack
 - React 19, TypeScript, Vite 7
 - Tailwind CSS 4

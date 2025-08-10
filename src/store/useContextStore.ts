@@ -23,6 +23,8 @@ export interface Conversation {
   parentConversationId?: string
   forkedFromUnitId?: string
   units: ContextUnit[]
+  // Lightweight checkpoints within a conversation timeline
+  snapshots?: Snapshot[]
   // Live summary state
   summary?: string
   summaryUpdatedAt?: string
@@ -38,6 +40,14 @@ export interface Conversation {
   // Attachments selection and token impact
   attachmentIds?: string[]
   totalAttachmentTokens?: number
+}
+
+export interface Snapshot {
+  id: string
+  title: string
+  createdAt: string
+  // Inclusive unit id that snapshot points to; if undefined, snapshot represents an empty conversation
+  upToUnitId?: string
 }
 
 export type ChatMessageForApi = { role: 'system' | 'user' | 'assistant'; content: string }
@@ -83,6 +93,11 @@ interface ContextStoreState {
   trimAfter: (conversationId: string, unitId: string) => void
   branchFrom: (conversationId: string, unitId: string, title?: string) => string
 
+  // Snapshots
+  createSnapshot: (conversationId: string, title?: string, upToUnitId?: string) => string
+  restoreSnapshot: (conversationId: string, snapshotId: string) => void
+  branchFromSnapshot: (conversationId: string, snapshotId: string, title?: string) => string
+
   // Edit modal flow
   editModal: EditModalState | null
   openEditModal: (conversationId: string, unitId: string, newContent: string) => void
@@ -119,6 +134,7 @@ const createInitialConversation = (): Conversation => ({
   title: 'New Conversation',
   createdAt: nowIso(),
   units: createInitialUnits(),
+  snapshots: [],
   summary: '',
   summaryUpdatedAt: '',
   summaryLoading: false,
@@ -272,6 +288,7 @@ export const useContextStore = create<ContextStoreState>()(
       units: (baseUnits && baseUnits.length
         ? baseUnits.map((u) => ({ ...u })) // preserve ids when branching
         : createInitialUnits()),
+      snapshots: [],
       summary: '',
       summaryUpdatedAt: '',
       summaryLoading: false,
@@ -509,6 +526,62 @@ export const useContextStore = create<ContextStoreState>()(
     return newId
   },
 
+  // Snapshot API
+  createSnapshot: (conversationId, title, upToUnitId) => {
+    let snapshotId = ''
+    set((state) => {
+      const idx = findConversationIndex(state as any, conversationId)
+      if (idx === -1) return state
+      const conv = state.conversations[idx]
+      const lastUnitId = conv.units[conv.units.length - 1]?.id
+      const snap = {
+        id: randomId(),
+        title: (title?.trim() || `Snapshot ${new Date().toLocaleString()}`),
+        createdAt: nowIso(),
+        upToUnitId: upToUnitId || lastUnitId,
+      } as Snapshot
+      snapshotId = snap.id
+      const conversations = [...state.conversations]
+      const existing = Array.isArray(conv.snapshots) ? conv.snapshots : []
+      conversations[idx] = { ...conv, snapshots: [...existing, snap] }
+      return { conversations }
+    })
+    return snapshotId
+  },
+  restoreSnapshot: (conversationId, snapshotId) => {
+    set((state) => {
+      const idx = findConversationIndex(state as any, conversationId)
+      if (idx === -1) return state
+      const conv = state.conversations[idx]
+      const snaps = Array.isArray(conv.snapshots) ? conv.snapshots : []
+      const snap = snaps.find((s) => s.id === snapshotId)
+      if (!snap) return state
+      if (!snap.upToUnitId) return state
+      const cutIndex = conv.units.findIndex((u) => u.id === snap.upToUnitId)
+      const trimmed = cutIndex === -1 ? [...conv.units] : conv.units.slice(0, cutIndex + 1)
+      const conversations = [...state.conversations]
+      conversations[idx] = { ...conv, units: trimmed }
+      // Update summaries/totals after restore
+      queueMicrotask(() => get().requestSummaryRefresh(conversationId))
+      queueMicrotask(() => get().recomputeTokenTotals(conversationId))
+      return { conversations }
+    })
+  },
+  branchFromSnapshot: (conversationId, snapshotId, title) => {
+    const state = get()
+    const conv = state.conversations.find((c) => c.id === conversationId)
+    if (!conv) return ''
+    const snaps = Array.isArray(conv.snapshots) ? conv.snapshots : []
+    const snap = snaps.find((s) => s.id === snapshotId)
+    if (!snap) return ''
+    const unitId = snap.upToUnitId
+    if (!unitId) {
+      // Empty convo snapshot → branch empty conversation
+      return get().createConversation(title, [], { parentConversationId: conversationId, forkedFromUnitId: undefined })
+    }
+    return get().branchFrom(conversationId, unitId, title)
+  },
+
   // Edit modal & regeneration flow
   editModal: null,
   openEditModal: (conversationId, unitId, newContent) =>
@@ -693,6 +766,7 @@ export const useContextStore = create<ContextStoreState>()(
           ...c,
           summaryLoading: false,
           summaryError: '',
+          snapshots: Array.isArray(c.snapshots) ? c.snapshots : [],
           attachmentIds: Array.isArray(c.attachmentIds) ? c.attachmentIds : [],
           totalAttachmentTokens: Number.isFinite(c.totalAttachmentTokens) ? c.totalAttachmentTokens : 0,
         })),
@@ -715,6 +789,14 @@ export const useContextStore = create<ContextStoreState>()(
                 pinned: !!u?.pinned,
                 removed: !!u?.removed,
                 timestamp: u?.timestamp || new Date().toISOString(),
+              }))
+            : [],
+          snapshots: Array.isArray(c?.snapshots)
+            ? c.snapshots.map((s: any) => ({
+                id: s?.id || Math.random().toString(36).slice(2),
+                title: s?.title || 'Snapshot',
+                createdAt: s?.createdAt || new Date().toISOString(),
+                upToUnitId: s?.upToUnitId,
               }))
             : [],
           summary: c?.summary || '',

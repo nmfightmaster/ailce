@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useContextStore } from '../store/useContextStore'
 import { Window } from './Window'
+import { HelpTooltip } from './HelpTooltip'
 
 export function ConversationManager() {
   const conversations = useContextStore((s) => s.conversations)
@@ -41,7 +42,11 @@ export function ConversationManager() {
   }
 
   return (
-    <Window title="Conversation Manager" subtitle="Create, switch, rename, delete, or fork conversations.">
+    <Window
+      title="Conversation Manager"
+      subtitle="Branches are full, independent conversations"
+      right={<HelpTooltip title={'Branches = independent conversation forks. Use a branch to explore alternatives without affecting the original conversation.'} />}
+    >
       <div className="p-3">
         <div className="mb-2 flex items-center gap-2">
           <input
@@ -80,11 +85,21 @@ export function ConversationManager() {
               <div key={c.id} className={`flex items-center gap-1 rounded-md border px-2 py-1 text-xs ${isActive ? 'border-sky-500/40 bg-sky-500/10 text-sky-200' : 'border-white/10 bg-white/5 text-zinc-300'}`}>
                 <button
                   className="truncate max-w-[12rem] flex items-center gap-1"
-                  title={parent ? `${c.title} (forked from: ${parent.title})` : c.title}
+                  title={parent ? `${c.title} — Branch of: ${parent.title}` : `${c.title} — Conversation`}
                   onClick={() => setActiveConversation(c.id)}
                 >
-                  {c.title}
-                  {parent && <span title="Forked" className="text-[10px]">↗</span>}
+                  {parent ? (
+                    <>
+                      <span className="rounded-sm bg-sky-500/20 px-1 py-[1px] text-[10px] text-sky-200">Branch</span>
+                      <span className="truncate">{c.title}</span>
+                      <span title={`Branch of ${parent.title}`} className="text-[10px]">↗</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="rounded-sm bg-white/10 px-1 py-[1px] text-[10px] text-zinc-200">Conversation</span>
+                      <span className="truncate">{c.title}</span>
+                    </>
+                  )}
                 </button>
                 <button
                   className="text-[10px] text-zinc-400 hover:text-zinc-200"
