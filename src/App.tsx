@@ -5,6 +5,7 @@ import { EditSaveModal } from './components/EditSaveModal'
 import { ConversationManager } from './components/ConversationManager'
 import { SummaryWindow } from './components/SummaryWindow'
 import { ThemeSettings } from './components/ThemeSettings'
+import { AttachmentLibrary } from './components/AttachmentLibrary'
 
 function App() {
   // Left/right sizing
@@ -91,7 +92,10 @@ function App() {
       {/* Right: Conversation window (top) + Context window (bottom) */}
       <div ref={rightRef} className="min-h-0 flex flex-col">
         <div style={{ height: topHeight }} className="min-h-[120px] overflow-hidden">
-          <ConversationManager />
+          <div className="grid grid-cols-2 gap-3 h-full p-3">
+            <ConversationManager />
+            <AttachmentLibrary />
+          </div>
         </div>
         {/* Horizontal resizer */}
         <div

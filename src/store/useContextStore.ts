@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { countTokensForText } from '../utils/tokenUtils'
+import { useAttachmentStore } from './useAttachmentStore'
 import { persist, createJSONStorage } from 'zustand/middleware'
 import { useSettingsStore } from './useSettingsStore'
 
@@ -34,6 +35,9 @@ export interface Conversation {
   totalTokens?: number
   totalUserTokens?: number
   totalAssistantTokens?: number
+  // Attachments selection and token impact
+  attachmentIds?: string[]
+  totalAttachmentTokens?: number
 }
 
 export type ChatMessageForApi = { role: 'system' | 'user' | 'assistant'; content: string }
@@ -101,6 +105,8 @@ interface ContextStoreState {
 
   // Summary
   requestSummaryRefresh: (conversationId: string, immediate?: boolean, force?: boolean) => void
+  // Attachments per conversation
+  setConversationAttachmentSelection: (conversationId: string | undefined, attachmentIds: string[]) => void
 }
 
 const nowIso = () => new Date().toISOString()
@@ -119,6 +125,8 @@ const createInitialConversation = (): Conversation => ({
   summaryError: '',
     summaryCacheKey: '',
     lastSummarySchemaVersion: 0,
+  attachmentIds: [],
+  totalAttachmentTokens: 0,
 })
 
 const findConversationIndex = (state: ContextStoreState, conversationId: string) =>
@@ -362,6 +370,12 @@ export const useContextStore = create<ContextStoreState>()(
     const conv = state.conversations.find((c) => c.id === conversationId)
     if (!conv) return []
     const { messages, totals } = internalAssembleWithTotals(conv.units, upToUnitId)
+    // Prepend selected attachment chunks as system messages
+    const selectedIds = conv.attachmentIds || []
+    const attachmentChunks = useAttachmentStore.getState().getChunksForAttachmentIds(selectedIds)
+    const attachmentMessages: ChatMessageForApi[] = attachmentChunks.map((ch) => ({ role: 'system', content: ch.text }))
+    const finalMessages = [...attachmentMessages, ...messages]
+    const attachmentTokens = attachmentChunks.reduce((sum, ch) => sum + (ch.tokenCount || 0), 0)
     // persist totals for UI
     set((s) => {
       const idx = findConversationIndex(s as any, conversationId)
@@ -372,16 +386,20 @@ export const useContextStore = create<ContextStoreState>()(
         totalTokens: totals.totalTokens,
         totalUserTokens: totals.totalUserTokens,
         totalAssistantTokens: totals.totalAssistantTokens,
+        totalAttachmentTokens: attachmentTokens,
       }
       return { conversations }
     })
-    return messages
+    return finalMessages
   },
   recomputeTokenTotals: (conversationId, upToUnitId) => {
     const state = get()
     const conv = state.conversations.find((c) => c.id === conversationId)
     if (!conv) return
     const { totals } = internalAssembleWithTotals(conv.units, upToUnitId)
+    const selectedIds = conv.attachmentIds || []
+    const attachmentChunks = useAttachmentStore.getState().getChunksForAttachmentIds(selectedIds)
+    const attachmentTokens = attachmentChunks.reduce((sum, ch) => sum + (ch.tokenCount || 0), 0)
     set((s) => {
       const idx = findConversationIndex(s as any, conversationId)
       if (idx === -1) return {}
@@ -391,6 +409,7 @@ export const useContextStore = create<ContextStoreState>()(
         totalTokens: totals.totalTokens,
         totalUserTokens: totals.totalUserTokens,
         totalAssistantTokens: totals.totalAssistantTokens,
+        totalAttachmentTokens: attachmentTokens,
       }
       return { conversations }
     })
@@ -650,6 +669,19 @@ export const useContextStore = create<ContextStoreState>()(
     }, DEBOUNCE_MS)
     summaryDebounceTimers.set(conversationId, tid)
   },
+  // Attachments selection per conversation
+  setConversationAttachmentSelection: (conversationId, attachmentIds) => {
+    if (!conversationId) return
+    set((s) => {
+      const idx = findConversationIndex(s as any, conversationId)
+      if (idx === -1) return {}
+      const conversations = [...s.conversations]
+      conversations[idx] = { ...conversations[idx], attachmentIds: [...attachmentIds] }
+      return { conversations }
+    })
+    // Recompute tokens to reflect attachment changes
+    queueMicrotask(() => get().recomputeTokenTotals(conversationId))
+  },
     }),
     {
       name: 'live-context-conversations',
@@ -661,6 +693,8 @@ export const useContextStore = create<ContextStoreState>()(
           ...c,
           summaryLoading: false,
           summaryError: '',
+          attachmentIds: Array.isArray(c.attachmentIds) ? c.attachmentIds : [],
+          totalAttachmentTokens: Number.isFinite(c.totalAttachmentTokens) ? c.totalAttachmentTokens : 0,
         })),
       }),
       migrate: (persisted, _version) => {
@@ -689,6 +723,8 @@ export const useContextStore = create<ContextStoreState>()(
           summaryError: '',
           summaryCacheKey: c?.summaryCacheKey || '',
           lastSummarySchemaVersion: c?.lastSummarySchemaVersion || 0,
+          attachmentIds: Array.isArray(c?.attachmentIds) ? c.attachmentIds : [],
+          totalAttachmentTokens: Number.isFinite(c?.totalAttachmentTokens) ? c.totalAttachmentTokens : 0,
         }))
         const activeConversationId =
           typeof base.activeConversationId === 'string' && conversations.find((x) => x.id === base.activeConversationId)

@@ -12,9 +12,22 @@ export interface SettingsState {
 
   /** Returns merged dictionary of static + custom models */
   getAllModels: () => Record<string, ModelInfo>
+
+  // Embeddings
+  embeddingModel: string
+  setEmbeddingModel: (modelId: string) => void
+  /** List known embedding model ids */
+  getAllEmbeddingModels: () => string[]
 }
 
 const DEFAULT_MODEL = 'gpt-4o'
+const DEFAULT_EMBEDDING_MODEL = 'text-embedding-3-small'
+const KNOWN_EMBEDDING_MODELS = [
+  'text-embedding-3-small',
+  'text-embedding-3-large',
+  'text-embedding-ada-002',
+  'text-search-ada-query-001',
+]
 
 export const useSettingsStore = create<SettingsState>()(
   persist(
@@ -38,17 +51,23 @@ export const useSettingsStore = create<SettingsState>()(
         }),
 
       getAllModels: () => ({ ...staticModelInfo, ...get().customModels }),
+
+      // Embeddings
+      embeddingModel: DEFAULT_EMBEDDING_MODEL,
+      setEmbeddingModel: (modelId) => set({ embeddingModel: modelId }),
+      getAllEmbeddingModels: () => KNOWN_EMBEDDING_MODELS,
     }),
     {
       name: 'live-context-settings',
       version: 1,
       storage: createJSONStorage(() => localStorage),
-      partialize: (state) => ({ model: state.model, customModels: state.customModels }),
+      partialize: (state) => ({ model: state.model, customModels: state.customModels, embeddingModel: state.embeddingModel }),
       migrate: (persisted, _v) => {
         const base = (persisted as any) || {}
         const model = typeof base.model === 'string' ? base.model : DEFAULT_MODEL
         const customModels = base.customModels && typeof base.customModels === 'object' ? base.customModels : {}
-        return { model, customModels } as Partial<SettingsState>
+        const embeddingModel = typeof base.embeddingModel === 'string' ? base.embeddingModel : DEFAULT_EMBEDDING_MODEL
+        return { model, customModels, embeddingModel } as Partial<SettingsState>
       },
     }
   )

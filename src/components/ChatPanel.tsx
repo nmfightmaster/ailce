@@ -9,6 +9,7 @@ import type { ThemeState } from '../store/useThemeStore'
 import { countTokensForText } from '../utils/tokenUtils'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { ModelSelector } from './ModelSelector'
+import { AttachmentChecklist } from './AttachmentChecklist'
 
 function roleLabel(role: ContextUnit['type'], assistantName: string) {
   if (role === 'user') return 'You'
@@ -51,6 +52,10 @@ export function ChatPanel() {
 
   const units = activeConversation?.units || []
   const hasSystemMessage = useMemo(() => units.some((u) => u.type === 'system' && !u.removed), [units])
+  const hasIncludedAttachments = useMemo(() => {
+    const ids = (activeConversation as any)?.attachmentIds as string[] | undefined
+    return Array.isArray(ids) && ids.length > 0
+  }, [activeConversation])
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
@@ -435,6 +440,11 @@ export function ChatPanel() {
         </div>
 
         <div className="border-t border-white/10 p-3">
+          {hasIncludedAttachments && (
+            <div className="mb-3">
+              <AttachmentChecklist />
+            </div>
+          )}
           {hasSystemMessage ? (
             <div className="space-y-2">
               <div className="flex items-center"><ModelSelector /></div>
