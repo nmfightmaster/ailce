@@ -5,13 +5,17 @@ Live Context Editor is a collaborative AI conversation manager that gives teams 
 ---
 
 ## Features
-- **Chat + Context curation**: Send messages and curate the exact context the model sees (pin, trim, branch, remove).
+- **Chat + Context curation**: Send messages and curate the exact context the model sees (pin, trim, remove, branch, snapshot).
 - **Model selector**: Choose from preset models or add custom ones with pricing and context window info.
 - **Streaming responses**: Live token streaming from the OpenAI Chat Completions API.
 - **Schema-enforced summaries**: Deterministic, schema-structured summaries that can serve as the sole context to continue work.
 - **Token counting**: Client-side token estimates using `@dqbd/tiktoken` (WASM) for OpenAI-compatible models.
 - **Local-first state**: Conversations and settings persist in `localStorage`.
 - **Theme & layout**: Adjustable panes, theme settings, and responsive UI built with Tailwind CSS.
+- **Snapshots (Checkpoints)**: Create lightweight restore points within a conversation; restore without creating a new conversation; branch from a snapshot to explore separately.
+- **Branching (Conversations)**: Fork a conversation from any point to explore alternatives independently; branches are clearly labeled in Conversation Manager.
+- **Attachment Library**: Add files, select relevant chunks into the assembled context, and see token impact by attachments.
+- **Onboarding Tooltips & Banners**: Inline tips clarify when to use snapshots vs branches.
 
 ## Branches vs Snapshots
 
@@ -73,9 +77,11 @@ npm run lint
 1. **Set a system message**: Before sending your first message, add a system instruction (e.g., “You are a concise assistant…”). The UI requires a system message to start.
 2. **Chat**: Type a message and press Enter (or click Send). Responses stream in.
 3. **Curate context**:
-   - Trim or branch a conversation from any point.
+   - Create a **snapshot** before risky edits; later click **Restore** in the Snapshots panel to roll back. You can also **Branch** from a snapshot to fork at a known-good state.
+   - **Branch** a conversation from any point (via edit/remove actions or Conversation Manager) to explore alternatives independently.
    - Mark units as removed to exclude them while preserving history.
    - View live token counts per message and totals.
+   - Use the **Attachment Library** to add files and select relevant chunks into the assembled context; token impact is shown.
 4. **Switch models**: Use the model selector to change models or add your own with context window and pricing metadata.
 5. **Summaries**: A schema-structured, human-readable summary is generated and refreshed as the conversation evolves. You can use this summary alone to continue the work without the original messages.
 6. Dev-only: Toggle “View assembled API context” to see exactly what the API receives.
