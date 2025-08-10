@@ -28,6 +28,8 @@ export interface Conversation {
   summaryLoading?: boolean
   summaryError?: string
   summaryCacheKey?: string
+  // Summary schema versioning to detect outdated formats
+  lastSummarySchemaVersion?: number
   // Token totals for assembled context
   totalTokens?: number
   totalUserTokens?: number
@@ -115,7 +117,8 @@ const createInitialConversation = (): Conversation => ({
   summaryUpdatedAt: '',
   summaryLoading: false,
   summaryError: '',
-  summaryCacheKey: '',
+    summaryCacheKey: '',
+    lastSummarySchemaVersion: 0,
 })
 
 const findConversationIndex = (state: ContextStoreState, conversationId: string) =>
@@ -225,7 +228,8 @@ function readLegacyPersisted(): { activeConversationId: string; conversations: C
       summaryUpdatedAt: c.summaryUpdatedAt || '',
       summaryLoading: false,
       summaryError: '',
-      summaryCacheKey: c.summaryCacheKey || '',
+          summaryCacheKey: c.summaryCacheKey || '',
+          lastSummarySchemaVersion: c.lastSummarySchemaVersion || 0,
     }))
     const activeConversationId =
       data.activeConversationId && conversations.find((c) => c.id === data.activeConversationId)
@@ -265,6 +269,7 @@ export const useContextStore = create<ContextStoreState>()(
       summaryLoading: false,
       summaryError: '',
       summaryCacheKey: '',
+      lastSummarySchemaVersion: 0,
     }
     set((state) => ({
       conversations: [...state.conversations, newConv],
@@ -683,6 +688,7 @@ export const useContextStore = create<ContextStoreState>()(
           summaryLoading: false,
           summaryError: '',
           summaryCacheKey: c?.summaryCacheKey || '',
+          lastSummarySchemaVersion: c?.lastSummarySchemaVersion || 0,
         }))
         const activeConversationId =
           typeof base.activeConversationId === 'string' && conversations.find((x) => x.id === base.activeConversationId)
@@ -698,26 +704,94 @@ export const useContextStore = create<ContextStoreState>()(
 // Summary helpers (module scope)
 const summaryDebounceTimers = new Map<string, number>()
 
-function buildSummarySource(units: ContextUnit[]): { text: string; cacheKey: string; hasContent: boolean } {
-  const sorted = [...units].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+const SUMMARY_SCHEMA_VERSION = 1
+
+function buildSummarySource(conv: Conversation): { text: string; cacheKey: string; hasContent: boolean } {
+  const { units } = conv
+  const sorted = [...units].sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  )
   const visible = sorted.filter((u) => !u.removed)
-  // Exclude system messages entirely; focus on user and assistant. Notes are treated as assistant context-light.
-  const filtered = visible.filter((u) => u.type === 'user' || u.type === 'assistant')
-  const hasContent = filtered.length > 0
-  const MAX_USER_CHARS_PER_MSG = 600
-  const MAX_ASSISTANT_CHARS_PER_MSG = 240
-  const lines = filtered.map((u) => {
-    const role = u.type === 'user' ? 'USER' : 'ASSISTANT'
-    const limit = u.type === 'user' ? MAX_USER_CHARS_PER_MSG : MAX_ASSISTANT_CHARS_PER_MSG
+
+  // Collect system-like messages (system and note)
+  const systemUnits = visible.filter((u) => u.type === 'system' || u.type === 'note')
+
+  // Collect pinned messages (any type) in chronological order
+  const pinnedUnits = visible.filter((u) => u.pinned)
+
+  // Collect recent user/assistant messages under a token budget
+  const conversationalUnits = visible.filter((u) => u.type === 'user' || u.type === 'assistant')
+  const hasContent = conversationalUnits.length > 0 || systemUnits.length > 0 || pinnedUnits.length > 0
+
+  // Build recent context with a token budget
+  const MAX_SOURCE_TOKENS = 1600
+  const MAX_PER_MSG_CHARS = 1200
+  let budget = MAX_SOURCE_TOKENS
+
+  const recent: ContextUnit[] = []
+  for (let i = conversationalUnits.length - 1; i >= 0; i--) {
+    const u = conversationalUnits[i]
+    // Skip if already included via pinned to avoid duplication later
+    if (u.pinned) continue
+    const preview = u.content.length > MAX_PER_MSG_CHARS ? `${u.content.slice(0, MAX_PER_MSG_CHARS)}…` : u.content
+    const line = `${u.type.toUpperCase()}: ${preview}`
+    const cost = countTokensForText(line)
+    if (budget - cost < 0) break
+    budget -= cost
+    recent.push(u)
+  }
+  recent.reverse()
+
+  // Prepare text sections
+  const metaLines: string[] = [
+    `Title: ${conv.title}`,
+    `CreatedAt: ${conv.createdAt}`,
+    conv.parentConversationId ? `ParentConversationId: ${conv.parentConversationId}` : '',
+    conv.forkedFromUnitId ? `ForkedFromUnitId: ${conv.forkedFromUnitId}` : '',
+    `SelectedModel: ${useSettingsStore.getState().model}`,
+  ].filter(Boolean)
+
+  const fmt = (u: ContextUnit) => {
+    const limit = MAX_PER_MSG_CHARS
     const content = u.content.length > limit ? `${u.content.slice(0, limit)}…` : u.content
+    const role = u.type === 'note' ? 'SYSTEM' : u.type.toUpperCase()
     return `${role}: ${content}`
-  })
-  const joined = lines.join('\n')
-  // Length limit for request payload
-  const MAX_CHARS = 4000
+  }
+
+  const sections: string[] = []
+  if (metaLines.length) {
+    sections.push('=== Metadata ===')
+    sections.push(...metaLines)
+  }
+  if (systemUnits.length) {
+    sections.push('=== System Messages ===')
+    sections.push(...systemUnits.map(fmt))
+  }
+  if (pinnedUnits.length) {
+    sections.push('=== Pinned ===')
+    sections.push(...pinnedUnits.map(fmt))
+  }
+  if (recent.length) {
+    sections.push('=== Recent Context ===')
+    sections.push(...recent.map(fmt))
+  }
+
+  const joined = sections.join('\n')
+  const MAX_CHARS = 8000
   const text = joined.length > MAX_CHARS ? joined.slice(-MAX_CHARS) : joined
-  // Simple cache key from filtered content
-  const cacheKey = `${filtered.length}|${text}`
+
+  // Cache key includes schema version and a digest of important markers
+  const lastUnitStamp = visible[visible.length - 1]?.timestamp || ''
+  const cacheKey = [
+    `v${SUMMARY_SCHEMA_VERSION}`,
+    String(visible.length),
+    lastUnitStamp,
+    String(systemUnits.length),
+    String(pinnedUnits.length),
+    String(recent.length),
+    conv.title,
+  ].join('|')
+
   return { text, cacheKey, hasContent }
 }
 
@@ -725,7 +799,7 @@ async function generateSummary(conversationId: string, force = false): Promise<v
   const state = useContextStore.getState()
   const conv = state.conversations.find((c) => c.id === conversationId)
   if (!conv) return
-  const { text, cacheKey, hasContent } = buildSummarySource(conv.units)
+  const { text, cacheKey, hasContent } = buildSummarySource(conv)
   if (!hasContent) {
     // No user/assistant content to summarize; keep the summary empty
     useContextStore.setState((s) => {
@@ -739,12 +813,18 @@ async function generateSummary(conversationId: string, force = false): Promise<v
         summaryLoading: false,
         summaryError: '',
         summaryCacheKey: cacheKey,
+        lastSummarySchemaVersion: SUMMARY_SCHEMA_VERSION,
       }
       return { conversations }
     })
     return
   }
-  if (!force && conv.summaryCacheKey === cacheKey && (conv.summary || '') !== '') {
+  if (
+    !force &&
+    conv.summaryCacheKey === cacheKey &&
+    (conv.summary || '') !== '' &&
+    (conv.lastSummarySchemaVersion || 0) === SUMMARY_SCHEMA_VERSION
+  ) {
     // Nothing changed; skip
     return
   }
@@ -760,15 +840,77 @@ async function generateSummary(conversationId: string, force = false): Promise<v
   try {
     const apiKey = import.meta.env.VITE_OPENAI_API_KEY as string | undefined
     if (!apiKey) throw new Error('Missing VITE_OPENAI_API_KEY')
-    const systemInstruction = 'Write a single short paragraph summarizing the conversation. Prioritize user inputs and intentions; compress assistant responses heavily; ignore any system prompts. Output only a neutral, third-person, declarative summary. Do not ask questions, give instructions, greet, or include meta commentary. If content is insufficient to summarize, return an empty string.'
+    const systemInstruction = [
+      'You are an AI summarizer. Your task is to distill a conversation into a self-contained working summary that can serve as the only context for continuing the work.',
+      'Follow this schema exactly:',
+      '',
+      '[Purpose / Goal]',
+      '<one sentence>',
+      '',
+      '[Key Decisions Made]',
+      '',
+      '<decision 1>',
+      '',
+      '<decision 2>',
+      '',
+      '[Important Facts & Constraints]',
+      '',
+      '<fact 1>',
+      '',
+      '<fact 2>',
+      '',
+      '[Pending or Open Questions]',
+      '',
+      '<question 1>',
+      '',
+      '<question 2>',
+      '',
+      '[References & Resources]',
+      '',
+      '<reference 1>',
+      '',
+      '<reference 2>',
+      '',
+      'Rules:',
+      '',
+      'Do NOT write "The user said..." or "The assistant responded..."',
+      '',
+      'Keep plain, direct language.',
+      '',
+      'Only include relevant and essential information.',
+      '',
+      'Maximum length: 500 tokens.'
+    ].join('\n')
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model: useSettingsStore.getState().model || 'gpt-4o-mini',
         temperature: 0,
+        // modest cap to prevent overruns; schema target is <=500 tokens
+        max_tokens: 800,
         messages: [
           { role: 'system', content: systemInstruction },
+          // Few-shot example to make output deterministic
+          { role: 'user', content: '=== Metadata ===\nTitle: Sample\nSelectedModel: gpt-4o\n=== System Messages ===\nSYSTEM: You are an expert coding assistant.\n=== Pinned ===\nUSER: Use TypeScript and React.\n=== Recent Context ===\nUSER: Build a settings panel to switch models.\nASSISTANT: Proposed a dropdown with persistence.' },
+          { role: 'assistant', content: [
+            '[Purpose / Goal]',
+            'Add a React settings panel to switch AI models with TypeScript and persist selection.',
+            '',
+            '[Key Decisions Made]',
+            '- Dropdown selector for model switching.',
+            '- Persist selection in local storage.',
+            '',
+            '[Important Facts & Constraints]',
+            '- Stack: React + TypeScript.',
+            '- Must integrate with existing model registry.',
+            '',
+            '[Pending or Open Questions]',
+            '- Confirm default model.',
+            '',
+            '[References & Resources]',
+            '- src/store/useSettingsStore.ts',
+          ].join('\n') },
           { role: 'user', content: text || 'No content.' },
         ],
       }),
@@ -788,6 +930,7 @@ async function generateSummary(conversationId: string, force = false): Promise<v
         summaryLoading: false,
         summaryError: '',
         summaryCacheKey: cacheKey,
+        lastSummarySchemaVersion: SUMMARY_SCHEMA_VERSION,
       }
       return { conversations }
     })

@@ -8,7 +8,7 @@ Live Context Editor is a collaborative AI conversation manager that gives teams 
 - **Chat + Context curation**: Send messages and curate the exact context the model sees (pin, trim, branch, remove).
 - **Model selector**: Choose from preset models or add custom ones with pricing and context window info.
 - **Streaming responses**: Live token streaming from the OpenAI Chat Completions API.
-- **Auto summaries**: Generates short summaries of the conversation.
+- **Schema-enforced summaries**: Deterministic, schema-structured summaries that can serve as the sole context to continue work.
 - **Token counting**: Client-side token estimates using `@dqbd/tiktoken` (WASM) for OpenAI-compatible models.
 - **Local-first state**: Conversations and settings persist in `localStorage`.
 - **Theme & layout**: Adjustable panes, theme settings, and responsive UI built with Tailwind CSS.
@@ -68,8 +68,63 @@ npm run lint
    - Mark units as removed to exclude them while preserving history.
    - View live token counts per message and totals.
 4. **Switch models**: Use the model selector to change models or add your own with context window and pricing metadata.
-5. **Summaries**: A short summary is generated and refreshed as the conversation evolves.
+5. **Summaries**: A schema-structured, human-readable summary is generated and refreshed as the conversation evolves. You can use this summary alone to continue the work without the original messages.
 6. Dev-only: Toggle “View assembled API context” to see exactly what the API receives.
+
+### Summary schema
+Summaries are concise, self-contained, and follow this exact structure:
+
+```
+[Purpose / Goal]
+One concise sentence describing the core objective.
+
+[Key Decisions Made]
+- Bullet list of main decisions.
+
+[Important Facts & Constraints]
+- Bullet list of critical technical or factual constraints.
+
+[Pending or Open Questions]
+- Bullet list of unresolved items or next steps.
+
+[References & Resources]
+- Bullet list of essential filenames, code references, or URLs (only if relevant).
+```
+
+Notes:
+- No narration like “The user said…” or “The assistant responded…”.
+- Plain, direct language. Only the most contextual information.
+- Target length ≤ 500 tokens.
+
+Example:
+
+```
+[Purpose / Goal]
+Add a React settings panel to switch AI models and persist selection.
+
+[Key Decisions Made]
+- Dropdown selector tied to Zustand store.
+- Persist selection in localStorage and default to `gpt-4o`.
+
+[Important Facts & Constraints]
+- Tech: React + TypeScript + Vite; store: `src/store/useSettingsStore.ts`.
+- Keep UI minimal; no server required.
+
+[Pending or Open Questions]
+- Confirm which custom models to prefill.
+
+[References & Resources]
+- src/store/useSettingsStore.ts
+- src/components/ModelSelector.tsx
+```
+
+### How summaries are built
+- **Source selection**: Includes system messages, all pinned items, and the most recent user/assistant messages under a token budget, plus basic conversation metadata (title, timestamps, model).
+- **Deterministic**: Temperature is 0 and a few-shot example is provided to the summarizer for consistent formatting.
+- **Caching & refresh**: Summaries are debounced and cached; they refresh automatically when content, pins, or system messages change.
+
+### Versioning
+- Each conversation stores `lastSummarySchemaVersion`. When the schema updates, older summaries are automatically refreshed on the next change or when you trigger a refresh (e.g., toggling a pin or editing a message).
 
 ## Environment variables
 - **`VITE_OPENAI_API_KEY` (required in dev)**: Your OpenAI key used for direct browser calls to the Chat Completions API.
@@ -87,6 +142,7 @@ Security note:
 - Conversations and settings persist in `localStorage` under keys like `live-context-conversations` and `live-context-settings`.
 - Layout preferences persist under `lce:leftWidth` and `lce:topHeight`.
 - To reset the app: clear your browser’s site data for this origin.
+ - Summaries cache a key that includes the schema version; conversations also store `lastSummarySchemaVersion` to detect and refresh older formats.
 
 ## Deployment
 This is a static Vite app and can be hosted on any static host (e.g., Vercel, Netlify, GitHub Pages). For production:
